@@ -250,5 +250,95 @@ class TestCli(CodeTimeTestCase):
         self.assertIn("Warning", out)
 
 
+class TestStopAt(CodeTimeTestCase):
+
+    def test_stop_at_earlier_today(self):
+        codetime.start_session(self.connection, "work")  # 09:00
+        self.set_time("2026-10-31 12:00:00")
+
+        _, started, ended = codetime.stop_session(self.connection, "10:30")
+
+        self.assertEqual(ended, at("2026-10-31 10:30:00"))
+        self.assertEqual((ended - started).total_seconds(), 90 * 60)
+
+    def test_stop_at_uses_yesterday_when_time_is_in_the_future(self):
+        self.set_time("2026-10-30 14:00:00")
+        codetime.start_session(self.connection, "forgot")
+        self.set_time("2026-10-31 09:00:00")
+
+        _, _, ended = codetime.stop_session(self.connection, "17:30")
+
+        self.assertEqual(ended, at("2026-10-30 17:30:00"))
+
+    def test_stop_at_before_start_is_rejected(self):
+        codetime.start_session(self.connection, "work")  # 09:00
+        self.set_time("2026-10-31 09:30:00")
+
+        with self.assertRaises(codetime.CodeTimeError):
+            codetime.stop_session(self.connection, "10:00")
+
+        self.assertIsNotNone(codetime.active_session(self.connection))
+
+    def test_bad_time_format_is_rejected(self):
+        codetime.start_session(self.connection, "work")
+
+        with self.assertRaises(codetime.CodeTimeError):
+            codetime.stop_session(self.connection, "5pm")
+
+
+class TestLogAndDelete(CodeTimeTestCase):
+
+    def test_log_lists_sessions_and_running_one(self):
+        codetime.start_session(self.connection, "done")
+        self.set_time("2026-10-31 10:00:00")
+        codetime.stop_session(self.connection)
+        codetime.start_session(self.connection, "live")
+
+        code, out, _ = self.run_cli("log")
+
+        self.assertEqual(code, 0)
+        self.assertIn("done", out)
+        self.assertIn("live", out)
+        self.assertIn("running", out)
+
+    def test_log_when_empty(self):
+        _, out, _ = self.run_cli("log")
+        self.assertIn("No sessions recorded", out)
+
+    def test_delete_with_yes_removes_session(self):
+        codetime.start_session(self.connection, "oops")
+        codetime.stop_session(self.connection)
+
+        code, out, _ = self.run_cli("delete", "1", "--yes")
+
+        self.assertEqual(code, 0)
+        self.assertEqual(codetime.list_sessions(self.connection, 10), [])
+
+    def test_delete_asks_and_respects_no(self):
+        codetime.start_session(self.connection, "keep")
+        codetime.stop_session(self.connection)
+
+        with patch("builtins.input", return_value="n"):
+            _, out, _ = self.run_cli("delete", "1")
+
+        self.assertIn("Nothing deleted", out)
+        self.assertEqual(len(codetime.list_sessions(self.connection, 10)), 1)
+
+    def test_delete_asks_and_accepts_yes(self):
+        codetime.start_session(self.connection, "remove")
+        codetime.stop_session(self.connection)
+
+        with patch("builtins.input", return_value="y"):
+            self.run_cli("delete", "1")
+
+        self.assertEqual(codetime.list_sessions(self.connection, 10), [])
+
+    def test_delete_unknown_id_fails_cleanly(self):
+        code, _, err = self.run_cli("delete", "99", "--yes")
+
+        self.assertEqual(code, 1)
+        self.assertIn("no session with ID 99", err)
+
+
 if __name__ == "__main__":
     unittest.main()

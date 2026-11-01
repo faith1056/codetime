@@ -48,6 +48,9 @@ codetime start [project]    start the timer (project defaults to the folder name
 codetime status             show the running session and today's total
 codetime stop               stop the timer
 codetime stop --email       stop the timer and email today's report
+codetime stop --at 17:30    stop the timer as of a past time (if you forgot to stop)
+codetime log [-n 20]        list recent sessions with their IDs
+codetime delete ID          delete a session (asks first; add --yes to skip)
 codetime report [period]    show a report: today (default), week, month, or all
 codetime report --email     also email the report
 codetime setup              one-time email setup
@@ -100,6 +103,37 @@ Work and school accounts often cannot create app passwords. In that case, use an
 
 Your settings are saved in `~/.codetime/config.env`, readable only by you. Never commit or share that file.
 
+## Fix a mistake
+
+If you forget to stop the timer, end the session at the time you really finished:
+
+```
+codetime stop --at 17:30
+```
+
+The time is in 24-hour format. It uses the most recent 17:30, so it works the next morning too. To remove a session entirely:
+
+```
+codetime log
+codetime delete 12
+```
+
+## Weekly report by email
+
+To get a report every Friday at 17:00, add a cron job:
+
+```
+crontab -e
+```
+
+Add this line (replace `student` with your username):
+
+```
+0 17 * * 5 /home/student/.local/bin/codetime report week --email >> /home/student/.codetime/cron.log 2>&1
+```
+
+Your computer must be on at that time. If something goes wrong, the error is written to `~/.codetime/cron.log`.
+
 ## Where your data lives
 
 Everything is stored in `~/.codetime/`:
@@ -120,14 +154,16 @@ python3 -m unittest discover tests
 ## Limitations
 
 - It times only what you tell it to. There is no idle detection, so remember to run `codetime stop`.
-- Sessions cannot be edited or deleted yet. If you forget to stop one, the totals will be too high (the app warns you when a session runs longer than 12 hours).
-- Reports are sent only when you ask. There is no built-in schedule.
+- If you forget to stop a session, fix it with `codetime stop --at HH:MM` (the app warns you when a session runs longer than 12 hours).
+- Reports are sent only when you ask, or on a schedule you set up with cron.
 
 ## Ideas for later
 
-- [ ] `codetime stop --at 17:30` to correct a forgotten stop
-- [ ] `codetime log` to list and delete sessions
-- [ ] Scheduled weekly reports with cron
+- [x] `codetime stop --at 17:30` to correct a forgotten stop
+- [x] `codetime log` and `codetime delete` to manage sessions
+- [x] Scheduled weekly reports with cron
+- [ ] Idle detection
+- [ ] Choose a different recipient per report
 
 ## Author
 

@@ -5,7 +5,10 @@ Usage:
     codetime setup                 one-time email setup
     codetime start [project]       start the timer (project defaults to the folder name)
     codetime status                show the running session
-    codetime stop [--email]        stop the timer
+    codetime stop [--at HH:MM]     stop the timer (--at fixes a forgotten stop)
+                  [--email]
+    codetime log [-n N]            list recent sessions with their IDs
+    codetime delete ID [--yes]     delete a session
     codetime report [period]       today (default), week, month, or all
                     [--email]      also send the report to your inbox
 """
@@ -155,14 +158,46 @@ def start_session(connection, project):
     return started
 
 
-def stop_session(connection):
+def parse_clock_time(text):
+    try:
+        return datetime.strptime(text.strip(), "%H:%M").time()
+    except ValueError:
+        raise CodeTimeError(
+            "Use the 24-hour format HH:MM, for example 17:30."
+        ) from None
+
+
+def resolve_stop_time(started, at_text, current):
+    """Work out when a session ended.
+
+    Without --at this is simply now. With --at it is the most recent
+    occurrence of that clock time, which must fall inside the session.
+    """
+    if not at_text:
+        return max(current, started)
+
+    candidate = datetime.combine(current.date(), parse_clock_time(at_text))
+
+    if candidate > current:
+        candidate -= timedelta(days=1)
+
+    if candidate < started:
+        raise CodeTimeError(
+            f"{at_text} is not between the session start "
+            f"({started:%a %d %b %H:%M}) and now."
+        )
+
+    return candidate
+
+
+def stop_session(connection, at=None):
     running = active_session(connection)
 
     if running is None:
         raise CodeTimeError("No session is running. Start one with 'codetime start'.")
 
     session_id, project, started = running
-    ended = max(now(), started)
+    ended = resolve_stop_time(started, at, now())
 
     connection.execute(
         "UPDATE sessions SET ended_at = ? WHERE id = ?",
@@ -171,6 +206,51 @@ def stop_session(connection):
     connection.commit()
 
     return project, started, ended
+
+
+def list_sessions(connection, limit):
+    """Return the newest sessions as (id, project, started, ended or None)."""
+    rows = connection.execute(
+        "SELECT id, project, started_at, ended_at FROM sessions "
+        "ORDER BY id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+
+    return [
+        (
+            row[0],
+            row[1],
+            datetime.fromisoformat(row[2]),
+            datetime.fromisoformat(row[3]) if row[3] else None,
+        )
+        for row in reversed(rows)
+    ]
+
+
+def get_session(connection, session_id):
+    row = connection.execute(
+        "SELECT id, project, started_at, ended_at FROM sessions WHERE id = ?",
+        (session_id,),
+    ).fetchone()
+
+    if row is None:
+        raise CodeTimeError(
+            f"There is no session with ID {session_id}. See 'codetime log'."
+        )
+
+    return (
+        row[0],
+        row[1],
+        datetime.fromisoformat(row[2]),
+        datetime.fromisoformat(row[3]) if row[3] else None,
+    )
+
+
+def delete_session(connection, session_id):
+    get_session(connection, session_id)
+
+    connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+    connection.commit()
 
 
 def collect_segments(connection, start, end, current):
@@ -419,7 +499,7 @@ def cmd_status(args):
 
 def cmd_stop(args):
     with connect() as connection:
-        project, started, ended = stop_session(connection)
+        project, started, ended = stop_session(connection, args.at)
         duration = (ended - started).total_seconds()
 
         print(f"Stopped '{project}'. This session: {format_duration(duration)}.")
@@ -458,6 +538,49 @@ def cmd_report(args):
             print("\nReport emailed.")
 
 
+def cmd_log(args):
+    with connect() as connection:
+        sessions = list_sessions(connection, args.number)
+
+    if not sessions:
+        print("No sessions recorded yet.")
+        return
+
+    current = now()
+    width = max(len("Project"), *(len(session[1]) for session in sessions))
+
+    print(f"{'ID':>4}  {'Project':<{width}}  {'Started':<16}  {'Ended':<16}  Duration")
+
+    for session_id, project, started, ended in sessions:
+        finish = ended or current
+        duration = format_duration((finish - started).total_seconds())
+        end_text = f"{ended:%a %d %b %H:%M}" if ended else "running"
+
+        print(
+            f"{session_id:>4}  {project:<{width}}  "
+            f"{started:%a %d %b %H:%M}  {end_text:<16}  {duration}"
+        )
+
+
+def cmd_delete(args):
+    with connect() as connection:
+        session_id, project, started, _ = get_session(connection, args.id)
+
+        if not args.yes:
+            answer = input(
+                f"Delete session {session_id} ('{project}', "
+                f"{started:%a %d %b %H:%M})? [y/N]: "
+            ).strip().lower()
+
+            if answer not in ("y", "yes"):
+                print("Nothing deleted.")
+                return
+
+        delete_session(connection, session_id)
+
+    print(f"Deleted session {session_id}.")
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="codetime",
@@ -476,8 +599,22 @@ def build_parser():
 
     stop = commands.add_parser("stop", help="stop the timer")
     stop.add_argument(
+        "--at",
+        metavar="HH:MM",
+        help="end the session at this time (use it if you forgot to stop)",
+    )
+    stop.add_argument(
         "--email", action="store_true", help="email today's report after stopping"
     )
+
+    log = commands.add_parser("log", help="list recent sessions")
+    log.add_argument(
+        "-n", "--number", type=int, default=10, help="how many to show (default 10)"
+    )
+
+    delete = commands.add_parser("delete", help="delete a session by its ID")
+    delete.add_argument("id", type=int, help="session ID from 'codetime log'")
+    delete.add_argument("--yes", action="store_true", help="do not ask for confirmation")
 
     report = commands.add_parser("report", help="show a report")
     report.add_argument("period", nargs="?", default="today", choices=PERIODS)
@@ -491,6 +628,8 @@ HANDLERS = {
     "start": cmd_start,
     "status": cmd_status,
     "stop": cmd_stop,
+    "log": cmd_log,
+    "delete": cmd_delete,
     "report": cmd_report,
 }
 
