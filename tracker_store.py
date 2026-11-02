@@ -56,3 +56,56 @@ class Store:
                 (ended.isoformat(), session_id),
             )
         self.connection.commit()
+
+
+def last_seen_path():
+    return codetime.app_dir() / "last_seen.txt"
+
+
+def write_last_seen(at):
+    """Save the time of the latest activity. A timestamp only, nothing else."""
+    path = last_seen_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(".tmp")
+    temp.write_text(at.isoformat())
+    temp.replace(path)  # replace in one step so a crash can't leave half a file
+
+
+def read_last_seen():
+    """Return the saved time, or None if missing or unreadable."""
+    try:
+        return datetime.fromisoformat(last_seen_path().read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def recover(connection, current, idle_limit):
+    """Close a row left open by a crash. Return None, 'closed' or 'deleted'.
+
+    A row is only touched if the tracker's last-seen time is older than
+    the idle limit AND the row started at or before that time. Anything
+    else (such as a manual session) is left alone. The row is closed at
+    the last-seen time, never at the current time.
+    """
+    running = codetime.active_session(connection)
+    last_seen = read_last_seen()
+
+    if running is None or last_seen is None:
+        return None
+
+    session_id, _, started = running
+
+    if current - last_seen < idle_limit or started > last_seen:
+        return None
+
+    if started == last_seen:
+        connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        connection.commit()
+        return "deleted"
+
+    connection.execute(
+        "UPDATE sessions SET ended_at = ? WHERE id = ?",
+        (last_seen.isoformat(), session_id),
+    )
+    connection.commit()
+    return "closed"
