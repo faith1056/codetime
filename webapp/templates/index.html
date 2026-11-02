@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>CodeTime — Coding Time Tracker</title>
+
+    <!-- Connect the dashboard to its CSS stylesheet -->
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+    <header>
+        <h1>CodeTime</h1>
+        <p>Track your coding time. Understand your progress.</p>
+    </header>
+
+    <main>
+        <!-- Current coding session -->
+        <section>
+            <h2>Current Session</h2>
+
+            <p id="session-status">No active session</p>
+
+            <button id="start-button" type="button">
+                Start Session
+            </button>
+
+            <button id="stop-button" type="button" disabled>
+                Stop Session
+            </button>
+        </section>
+
+        <!-- Total coding time for today -->
+        <section>
+            <h2>Today's Progress</h2>
+
+            <p>
+                Total time:
+                <strong id="today-total">0 minutes</strong>
+            </p>
+        </section>
+
+        <!-- Recent coding sessions -->
+        <section>
+            <h2>Recent Sessions</h2>
+
+            <div id="recent-sessions">
+                <p>Loading recent sessions...</p>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>CodeTime — Build better habits, one session at a time.</p>
+    </footer>
+
+    <script>
+        const startButton = document.getElementById("start-button");
+        const stopButton = document.getElementById("stop-button");
+        const sessionStatus = document.getElementById("session-status");
+        const todayTotal = document.getElementById("today-total");
+        const recentSessions = document.getElementById("recent-sessions");
+
+        // Format seconds into a readable duration.
+        function formatDuration(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const remainingSeconds = seconds % 60;
+
+            if (hours > 0) {
+                return `${hours}h ${minutes}m`;
+            }
+
+            if (minutes > 0) {
+                return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+            }
+
+            return `${remainingSeconds} second${remainingSeconds === 1 ? "" : "s"}`;
+        }
+
+        // Update the current session and today's total.
+        async function refreshDashboard() {
+            try {
+                const response = await fetch("/api/status");
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error("Could not load session status.");
+                }
+
+                const session = data.active_session;
+
+                if (session) {
+                    sessionStatus.textContent =
+                        `Running: ${session.project} (${formatDuration(session.elapsed_seconds)})`;
+
+                    startButton.disabled = true;
+                    stopButton.disabled = false;
+                } else {
+                    sessionStatus.textContent = "No active session";
+
+                    startButton.disabled = false;
+                    stopButton.disabled = true;
+                }
+
+                todayTotal.textContent = formatDuration(data.today_seconds);
+            } catch (error) {
+                sessionStatus.textContent =
+                    "Unable to connect to CodeTime.";
+
+                console.error("Dashboard error:", error);
+            }
+        }
+
+        // Fetch and display the ten most recent sessions.
+        async function refreshRecentSessions() {
+            try {
+                const response = await fetch("/api/sessions");
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error("Could not load recent sessions.");
+                }
+
+                // Clear the previous session list.
+                recentSessions.replaceChildren();
+
+                if (data.sessions.length === 0) {
+                    const message = document.createElement("p");
+                    message.textContent = "No sessions recorded yet.";
+                    recentSessions.appendChild(message);
+                    return;
+                }
+
+                // Display each session, newest first.
+                for (const session of data.sessions) {
+                    const card = document.createElement("article");
+                    card.className = "session-entry";
+
+                    const projectName = document.createElement("h3");
+                    projectName.textContent = session.project;
+
+                    const startTime = document.createElement("p");
+                    startTime.textContent =
+                        `Started: ${new Date(session.started_at).toLocaleString()}`;
+
+                    const duration = document.createElement("p");
+
+                    if (session.active) {
+                        duration.textContent = "Status: In progress";
+                    } else {
+                        duration.textContent =
+                            `Duration: ${formatDuration(session.duration_seconds)}`;
+                    }
+
+                    card.appendChild(projectName);
+                    card.appendChild(startTime);
+                    card.appendChild(duration);
+
+                    recentSessions.appendChild(card);
+                }
+            } catch (error) {
+                recentSessions.textContent =
+                    "Unable to load recent sessions.";
+
+                console.error("Recent sessions error:", error);
+            }
+        }
+
+        // Start a coding session.
+        startButton.addEventListener("click", async () => {
+            startButton.disabled = true;
+
+            try {
+                const response = await fetch("/api/start", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        project: "CodeTime dashboard"
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(
+                        data.detail || "Could not start session."
+                    );
+                }
+
+                await refreshDashboard();
+                await refreshRecentSessions();
+            } catch (error) {
+                alert(error.message);
+                await refreshDashboard();
+            }
+        });
+
+        // Stop the active coding session.
+        stopButton.addEventListener("click", async () => {
+            stopButton.disabled = true;
+
+            try {
+                const response = await fetch("/api/stop", {
+                    method: "POST"
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(
+                        data.detail || "Could not stop session."
+                    );
+                }
+
+                await refreshDashboard();
+                await refreshRecentSessions();
+            } catch (error) {
+                alert(error.message);
+                await refreshDashboard();
+            }
+        });
+
+        // Load dashboard information when the page opens.
+        refreshDashboard();
+        refreshRecentSessions();
+
+        // Keep the current session information updated.
+        setInterval(refreshDashboard, 1000);
+    </script>
+</body>
+</html>
