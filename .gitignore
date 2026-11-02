@@ -21,4 +21,4 @@ config.env
 # Editors
 .vscode/
 .idea/
-EOF
+node_modules/

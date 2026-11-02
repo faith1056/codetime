@@ -1,0 +1,44 @@
+{
+  "name": "codetime-workspace-tracker",
+  "displayName": "CodeTime Workspace Tracker",
+  "description": "Detects the active VS Code workspace and project folder to help CodeTime track coding sessions automatically.",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "codetime-workspace-tracker.helloWorld",
+        "title": "Hello World"
+      },
+      {
+        "command": "codetime-workspace-tracker.showWorkspace",
+        "title": "CodeTime: Show Active Project Folder"
+      }
+    ]
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "pretest": "npm run lint",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "24.x",
+    "@types/vscode": "^1.144.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0",
+    "eslint": "^10.5.0",
+    "globals": "^17.14.0"
+  },
+  "overrides": {
+    "diff": "^8.0.4",
+    "serialize-javascript": "^7.0.6"
+  }
+}
