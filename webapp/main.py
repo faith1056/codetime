@@ -1,6 +1,7 @@
 """CodeTime web application (FastAPI)."""
 
-from contextlib import closing
+import asyncio
+from contextlib import asynccontextmanager, closing
 import threading
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import codetime
 import tracker_auth
 import tracker_engine
 import tracker_events
+import tracker_service
 from fastapi import Body, Depends, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -17,7 +19,22 @@ from pydantic import BaseModel
 def create_app() -> FastAPI:
     """Build and return the FastAPI application."""
 
+    engine = tracker_engine.Engine()
+    engine_lock = threading.Lock()
+
+    @asynccontextmanager
+    async def lifespan(app):
+        await asyncio.to_thread(tracker_service.startup, engine, engine_lock)
+        task = asyncio.create_task(
+            tracker_service.tick_forever(engine, engine_lock)
+        )
+        try:
+            yield
+        finally:
+            task.cancel()
+
     app = FastAPI(
+        lifespan=lifespan,
         title="CodeTime",
         version="0.1.0",
         description="Track your coding time from the browser.",
@@ -172,9 +189,6 @@ def create_app() -> FastAPI:
 
         return {"sessions": results}
 
-
-    engine = tracker_engine.Engine()
-    engine_lock = threading.Lock()
 
     def require_token(x_codetime_token: str | None = Header(default=None)):
         """Reject any request that lacks the correct secret token."""
