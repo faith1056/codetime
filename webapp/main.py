@@ -1,10 +1,13 @@
 """CodeTime web application (FastAPI)."""
 
 from contextlib import closing
+import threading
 from pathlib import Path
 
 import codetime
-from fastapi import FastAPI, HTTPException
+import tracker_auth
+import tracker_engine
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -168,6 +171,30 @@ def create_app() -> FastAPI:
 
         return {"sessions": results}
 
+
+    engine = tracker_engine.Engine()
+    engine_lock = threading.Lock()
+
+    def require_token(x_codetime_token: str | None = Header(default=None)):
+        """Reject any request that lacks the correct secret token."""
+        if not tracker_auth.is_valid(x_codetime_token):
+            raise HTTPException(
+                status_code=401,
+                detail="Missing or invalid token.",
+            )
+
+    @app.get(
+        "/tracker/state",
+        tags=["tracker"],
+        dependencies=[Depends(require_token)],
+    )
+    def tracker_status() -> dict:
+        """Return the tracker's current state and project."""
+        with engine_lock:
+            return {
+                "state": engine.tracker.state.value,
+                "project": engine.tracker.project,
+            }
 
     return app
 
