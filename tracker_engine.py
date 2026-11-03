@@ -5,20 +5,19 @@ from tracker_state import DEFAULT_IDLE_LIMIT, State, Tracker
 
 
 class Engine:
-    def __init__(self, connection, idle_limit=DEFAULT_IDLE_LIMIT):
-        self.connection = connection
+    """Holds tracking state only. Each call is given its own connection."""
+
+    def __init__(self, idle_limit=DEFAULT_IDLE_LIMIT):
         self.idle_limit = idle_limit
         self.tracker = Tracker(idle_limit)
-        self.store = tracker_store.Store(connection)
+        self.store = tracker_store.Store()
 
-    def start(self, current):
+    def start(self, connection, current):
         """Run crash recovery once. Returns None, 'closed' or 'deleted'."""
-        return tracker_store.recover(
-            self.connection, current, self.idle_limit
-        )
+        return tracker_store.recover(connection, current, self.idle_limit)
 
-    def _apply(self, actions, current):
-        self.store.apply(actions, current)
+    def _apply(self, connection, actions, current):
+        self.store.apply(connection, actions, current)
         if self.tracker.state is State.ACTIVE:
             tracker_store.write_last_seen(self.tracker.last_activity)
         else:
@@ -30,19 +29,29 @@ class Engine:
         except OSError:
             pass
 
-    def activity(self, project, current):
+    def _notice_manual_stop(self, connection, current):
+        """If our row was stopped from outside, go to PAUSED and stay there."""
+        if self.tracker.state is State.ACTIVE and (
+            self.store.closed_from_outside(connection)
+        ):
+            self.tracker.pause(current)
+            self._clear_last_seen()
+
+    def activity(self, connection, project, current):
+        self._notice_manual_stop(connection, current)
         actions = self.tracker.activity(project, current)
-        self._apply(actions, current)
+        self._apply(connection, actions, current)
 
-    def tick(self, current):
+    def tick(self, connection, current):
+        self._notice_manual_stop(connection, current)
         actions = self.tracker.check_idle(current)
-        self._apply(actions, current)
+        self._apply(connection, actions, current)
 
-    def pause(self, current):
-        self._apply(self.tracker.pause(current), current)
+    def pause(self, connection, current):
+        self._apply(connection, self.tracker.pause(current), current)
 
     def resume(self, current):
         self.tracker.resume(current)
 
-    def stop(self, current):
-        self._apply(self.tracker.stop(current), current)
+    def stop(self, connection, current):
+        self._apply(connection, self.tracker.stop(current), current)

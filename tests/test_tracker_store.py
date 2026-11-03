@@ -20,7 +20,7 @@ class TestStore(unittest.TestCase):
         self.old_home = os.environ.get("CODETIME_HOME")
         os.environ["CODETIME_HOME"] = self.folder.name
         self.connection = codetime.connect()
-        self.store = Store(self.connection)
+        self.store = Store()
 
     def tearDown(self):
         self.connection.close()
@@ -36,43 +36,43 @@ class TestStore(unittest.TestCase):
         ).fetchall()
 
     def test_open_inserts_an_open_row(self):
-        self.store.apply([Action("open", "alpha", t(0))], t(1))
+        self.store.apply(self.connection, [Action("open", "alpha", t(0))], t(1))
         self.assertEqual(self.rows(), [("alpha", t(0).isoformat(), None)])
 
     def test_close_sets_ended_at(self):
-        self.store.apply([Action("open", "alpha", t(0))], t(1))
-        self.store.apply([Action("close", "alpha", t(5))], t(6))
+        self.store.apply(self.connection, [Action("open", "alpha", t(0))], t(1))
+        self.store.apply(self.connection, [Action("close", "alpha", t(5))], t(6))
         self.assertEqual(
             self.rows(), [("alpha", t(0).isoformat(), t(5).isoformat())]
         )
 
     def test_zero_length_row_is_deleted(self):
-        self.store.apply([Action("open", "alpha", t(0))], t(1))
-        self.store.apply([Action("close", "alpha", t(0))], t(1))
+        self.store.apply(self.connection, [Action("open", "alpha", t(0))], t(1))
+        self.store.apply(self.connection, [Action("close", "alpha", t(0))], t(1))
         self.assertEqual(self.rows(), [])
 
     def test_manual_session_blocks_the_tracker(self):
         codetime.start_session(self.connection, "manual")
-        self.store.apply([Action("open", "alpha", t(0))], t(1))
+        self.store.apply(self.connection, [Action("open", "alpha", t(0))], t(1))
         self.assertEqual(len(self.rows()), 1)
         self.assertEqual(self.rows()[0][0], "manual")
 
     def test_close_after_codetime_stop_does_nothing(self):
-        self.store.apply([Action("open", "alpha", t(0))], t(1))
+        self.store.apply(self.connection, [Action("open", "alpha", t(0))], t(1))
         self.connection.execute(
             "UPDATE sessions SET ended_at = ?", (t(3).isoformat(),)
         )
         self.connection.commit()
-        self.store.apply([Action("close", "alpha", t(5))], t(6))
+        self.store.apply(self.connection, [Action("close", "alpha", t(5))], t(6))
         self.assertEqual(self.rows()[0][2], t(3).isoformat())
 
     def test_close_time_is_never_in_the_future(self):
-        self.store.apply([Action("open", "alpha", t(0))], t(1))
-        self.store.apply([Action("close", "alpha", t(30))], t(10))
+        self.store.apply(self.connection, [Action("open", "alpha", t(0))], t(1))
+        self.store.apply(self.connection, [Action("close", "alpha", t(30))], t(10))
         self.assertEqual(self.rows()[0][2], t(10).isoformat())
 
     def test_close_without_open_does_nothing(self):
-        self.store.apply([Action("close", "alpha", t(5))], t(6))
+        self.store.apply(self.connection, [Action("close", "alpha", t(5))], t(6))
         self.assertEqual(self.rows(), [])
 
 

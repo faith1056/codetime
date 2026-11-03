@@ -6,35 +6,54 @@ import codetime
 
 
 class Store:
-    def __init__(self, connection):
-        self.connection = connection
+    """Remembers which row the tracker opened. Holds no connection."""
+
+    def __init__(self):
         self.open_id = None  # the row this tracker opened, if any
 
-    def apply(self, actions, current):
+    def apply(self, connection, actions, current):
         for action in actions:
             if action.kind == "open":
-                self._open(action)
+                self._open(connection, action)
             elif action.kind == "close":
-                self._close(action, current)
+                self._close(connection, action, current)
 
-    def _open(self, action):
+    def closed_from_outside(self, connection):
+        """True if our row was stopped or deleted by someone else.
+
+        When that happens, the store forgets the row.
+        """
+        if self.open_id is None:
+            return False
+
+        row = connection.execute(
+            "SELECT ended_at FROM sessions WHERE id = ?", (self.open_id,)
+        ).fetchone()
+
+        if row is not None and row[0] is None:
+            return False
+
+        self.open_id = None
+        return True
+
+    def _open(self, connection, action):
         # Never open a row while another one (e.g. a manual session) is open.
-        if codetime.active_session(self.connection) is not None:
+        if codetime.active_session(connection) is not None:
             return
 
-        cursor = self.connection.execute(
+        cursor = connection.execute(
             "INSERT INTO sessions (project, started_at) VALUES (?, ?)",
             (action.project, action.at.isoformat()),
         )
-        self.connection.commit()
+        connection.commit()
         self.open_id = cursor.lastrowid
 
-    def _close(self, action, current):
+    def _close(self, connection, action, current):
         if self.open_id is None:
             return
 
         session_id, self.open_id = self.open_id, None
-        row = self.connection.execute(
+        row = connection.execute(
             "SELECT started_at, ended_at FROM sessions WHERE id = ?",
             (session_id,),
         ).fetchone()
@@ -47,17 +66,15 @@ class Store:
         ended = min(action.at, current)  # never in the future
 
         if ended <= started:
-            self.connection.execute(
+            connection.execute(
                 "DELETE FROM sessions WHERE id = ?", (session_id,)
             )
         else:
-            self.connection.execute(
+            connection.execute(
                 "UPDATE sessions SET ended_at = ? WHERE id = ?",
                 (ended.isoformat(), session_id),
             )
-        self.connection.commit()
-
-
+        connection.commit()
 def last_seen_path():
     return codetime.app_dir() / "last_seen.txt"
 
@@ -109,3 +126,4 @@ def recover(connection, current, idle_limit):
     )
     connection.commit()
     return "closed"
+
