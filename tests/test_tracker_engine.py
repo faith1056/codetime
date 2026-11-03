@@ -111,5 +111,33 @@ class TestEngine(unittest.TestCase):
         )
 
 
+    def test_manual_stop_pauses_the_tracker(self):
+        self.engine.activity(self.connection, "alpha", t(0))
+        self.engine.activity(self.connection, "alpha", t(1))
+        self.connection.execute(
+            "UPDATE sessions SET ended_at = ?", (t(2).isoformat(),)
+        )
+        self.connection.commit()
+        self.engine.activity(self.connection, "alpha", t(3))
+        self.assertEqual(self.engine.tracker.state.name, "PAUSED")
+        self.assertEqual(
+            self.rows(), [("alpha", t(0).isoformat(), t(2).isoformat())]
+        )
+
+    def test_manual_session_while_idle_keeps_state_consistent(self):
+        self.engine.activity(self.connection, "alpha", t(0))
+        self.engine.activity(self.connection, "alpha", t(2))
+        self.engine.tick(self.connection, t(8))
+        self.connection.execute(
+            "INSERT INTO sessions (project, started_at) VALUES (?, ?)",
+            ("manual", t(10).isoformat()),
+        )
+        self.connection.commit()
+        self.engine.activity(self.connection, "alpha", t(20))
+        self.assertEqual(len(self.rows()), 2)
+        self.assertIsNone(self.rows()[1][2])
+        self.assertNotEqual(self.engine.tracker.state.name, "ACTIVE")
+
+
 if __name__ == "__main__":
     unittest.main()

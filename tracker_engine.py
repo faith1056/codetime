@@ -18,6 +18,9 @@ class Engine:
 
     def _apply(self, connection, actions, current):
         self.store.apply(connection, actions, current)
+        if self.tracker.state is State.ACTIVE and self.store.open_id is None:
+            # The store refused to open a row (a manual session is running).
+            self.tracker.pause(current)
         if self.tracker.state is State.ACTIVE:
             tracker_store.write_last_seen(self.tracker.last_activity)
         else:
