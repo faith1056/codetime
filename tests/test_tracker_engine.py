@@ -74,8 +74,42 @@ class TestEngine(unittest.TestCase):
 
     def test_activity_after_idle_starts_a_new_row(self):
         self.engine.activity("alpha", t(0))
+        self.engine.activity("alpha", t(2))
         self.engine.tick(t(6))
         self.engine.activity("alpha", t(20))
         self.assertEqual(len(self.rows()), 2)
         self.assertIsNone(self.rows()[1][2])
 
+    def test_pause_closes_row_and_ignores_activity(self):
+        self.engine.activity("alpha", t(0))
+        self.engine.pause(t(2))
+        self.engine.activity("alpha", t(3))
+        self.assertEqual(
+            self.rows(), [("alpha", t(0).isoformat(), t(2).isoformat())]
+        )
+        self.assertIsNone(tracker_store.read_last_seen())
+
+    def test_stop_closes_row_and_clears_last_seen(self):
+        self.engine.activity("alpha", t(0))
+        self.engine.stop(t(4))
+        self.assertEqual(
+            self.rows(), [("alpha", t(0).isoformat(), t(4).isoformat())]
+        )
+        self.assertIsNone(tracker_store.read_last_seen())
+
+    def test_start_recovers_a_crash_leftover(self):
+        self.engine.activity("alpha", t(0))
+        self.engine.activity("alpha", t(4))
+        self.connection.close()
+
+        self.connection = codetime.connect()
+        new_engine = Engine(self.connection)
+        result = new_engine.start(t(60))
+        self.assertEqual(result, "closed")
+        self.assertEqual(
+            self.rows(), [("alpha", t(0).isoformat(), t(4).isoformat())]
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
