@@ -222,6 +222,50 @@ def create_app() -> FastAPI:
                 "project": engine.tracker.project,
             }
 
+    @app.post(
+        "/tracker/pause",
+        tags=["tracker"],
+        dependencies=[Depends(require_token)],
+    )
+    def tracker_pause() -> dict:
+        """Pause tracking. Activity is ignored until resume."""
+        with engine_lock:
+            with closing(codetime.connect()) as connection:
+                engine.pause(connection, codetime.now())
+            return {
+                "state": engine.tracker.state.value,
+                "project": engine.tracker.project,
+            }
+
+    @app.post(
+        "/tracker/resume",
+        tags=["tracker"],
+        dependencies=[Depends(require_token)],
+    )
+    def tracker_resume() -> dict:
+        """Leave the paused state. The next event starts a new row."""
+        with engine_lock:
+            engine.resume(codetime.now())
+            return {
+                "state": engine.tracker.state.value,
+                "project": engine.tracker.project,
+            }
+
+    @app.post(
+        "/tracker/stop",
+        tags=["tracker"],
+        dependencies=[Depends(require_token)],
+    )
+    def tracker_stop() -> dict:
+        """Close the open row and return to the stopped state."""
+        with engine_lock:
+            with closing(codetime.connect()) as connection:
+                engine.stop(connection, codetime.now())
+            return {
+                "state": engine.tracker.state.value,
+                "project": engine.tracker.project,
+            }
+
     return app
 
 
