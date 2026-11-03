@@ -7,7 +7,8 @@ from pathlib import Path
 import codetime
 import tracker_auth
 import tracker_engine
-from fastapi import Depends, FastAPI, Header, HTTPException
+import tracker_events
+from fastapi import Body, Depends, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -191,6 +192,31 @@ def create_app() -> FastAPI:
     def tracker_status() -> dict:
         """Return the tracker's current state and project."""
         with engine_lock:
+            return {
+                "state": engine.tracker.state.value,
+                "project": engine.tracker.project,
+            }
+
+    @app.post(
+        "/tracker/event",
+        tags=["tracker"],
+        dependencies=[Depends(require_token)],
+    )
+    def tracker_event(data: dict = Body(...)) -> dict:
+        """Record that coding activity happened in a project."""
+        current = codetime.now()
+
+        try:
+            project, moment = tracker_events.parse_event(data, current)
+        except codetime.CodeTimeError as error:
+            raise HTTPException(
+                status_code=400,
+                detail=str(error),
+            ) from error
+
+        with engine_lock:
+            with closing(codetime.connect()) as connection:
+                engine.activity(connection, project, moment)
             return {
                 "state": engine.tracker.state.value,
                 "project": engine.tracker.project,
