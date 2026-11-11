@@ -2,7 +2,7 @@
 
 A small command-line app that tracks how long you code and emails you a report.
 
-Start the timer when you sit down to code, stop it when you finish, and get a summary by project and by day. It uses only Python's standard library, so there is nothing to install.
+Start the timer when you sit down to code, stop it when you finish, and get a summary by project and by day. The command-line app uses only Python's standard library, so it needs no extra packages. The optional web dashboard and editor tracker need a few more (see "Web dashboard and editor tracker" below).
 
 ## Features
 
@@ -15,7 +15,7 @@ Start the timer when you sit down to code, stop it when you finish, and get a su
 
 ## Requirements
 
-- Python 3.9 or newer
+- Python 3.10 or newer (the web dashboard code uses syntax that Python 3.9 does not support)
 - An email account with SMTP access if you want emailed reports (Gmail works with an app password)
 
 ## Install
@@ -134,6 +134,32 @@ Add this line (replace `student` with your username):
 
 Your computer must be on at that time. If something goes wrong, the error is written to `~/.codetime/cron.log`.
 
+## Web dashboard and editor tracker
+
+CodeTime also includes a small local web dashboard and an editor tracker. They are optional; the command-line app works without them.
+
+Install the extra packages (a virtual environment keeps them separate from your system Python):
+
+```
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Start the server:
+
+```
+uvicorn webapp.main:app --host 127.0.0.1 --port 47625
+```
+
+Then open http://127.0.0.1:47625 in your browser. The VS Code extension in `codetime-vscode/codetime-workspace-tracker` sends activity to this address, using the token in `~/.codetime/token`.
+
+**Security notes (current state):**
+
+- Keep `--host 127.0.0.1`. That makes the server reachable only from your own computer. Do not use `--host 0.0.0.0`.
+- There are no user accounts or login yet. The dashboard has no password, and the token only protects the `/tracker/*` endpoints.
+- The extension sends only the project folder name and a time. It never sends file contents or keystrokes.
+
 ## Where your data lives
 
 Everything is stored in `~/.codetime/`:
@@ -142,18 +168,21 @@ Everything is stored in `~/.codetime/`:
 | --- | --- |
 | `sessions.db` | your coding sessions |
 | `config.env` | your email settings, including the password |
+| `token` | the secret the editor extension uses to talk to the tracker |
+| `last_seen.txt` | the time of the latest editor activity, used to recover after a crash |
 
 Set the `CODETIME_HOME` environment variable to use a different folder.
 
 ## Run the tests
 
 ```
+pip install -r requirements-dev.txt
 python3 -m unittest discover tests
 ```
 
 ## Limitations
 
-- It times only what you tell it to. There is no idle detection, so remember to run `codetime stop`.
+- The command-line timer counts only what you tell it to. It has no idle detection, so remember to run `codetime stop`. (The editor tracker described above stops counting after 5 minutes without activity.)
 - If you forget to stop a session, fix it with `codetime stop --at HH:MM` (the app warns you when a session runs longer than 12 hours).
 - Reports are sent only when you ask, or on a schedule you set up with cron.
 
