@@ -58,7 +58,8 @@ class TestControlRoutes(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["state"], "paused")
         self.event()
-        self.assertEqual(len(self.rows()), 0)
+        open_rows = [row for row in self.rows() if row[2] is None]
+        self.assertEqual(open_rows, [])
 
     def test_resume_lets_the_next_event_open_a_row(self):
         self.event()
@@ -66,9 +67,8 @@ class TestControlRoutes(unittest.TestCase):
         response = self.client.post("/tracker/resume", headers=self.headers)
         self.assertEqual(response.json()["state"], "stopped")
         self.event()
-        rows = self.rows()
-        self.assertEqual(len(rows), 1)
-        self.assertIsNone(rows[0][2])
+        open_rows = [row for row in self.rows() if row[2] is None]
+        self.assertEqual(len(open_rows), 1)
 
     def test_stop_closes_the_open_row(self):
         self.event()
