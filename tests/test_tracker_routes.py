@@ -19,7 +19,7 @@ class TestTrackerState(unittest.TestCase):
         self.folder = tempfile.TemporaryDirectory()
         self.old_home = os.environ.get("CODETIME_HOME")
         os.environ["CODETIME_HOME"] = self.folder.name
-        self.client = TestClient(create_app())
+        self.client = TestClient(create_app(), base_url="http://127.0.0.1:47625")
 
     def tearDown(self):
         if self.old_home is None:
