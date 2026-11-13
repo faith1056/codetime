@@ -16,7 +16,7 @@ except ImportError:  # the web libraries are optional for the CLI tests
 class TestHealth(unittest.TestCase):
 
     def setUp(self):
-        self.client = TestClient(create_app())
+        self.client = TestClient(create_app(), base_url="http://127.0.0.1:47625")
 
     def test_health_returns_ok(self):
         response = self.client.get("/health")
