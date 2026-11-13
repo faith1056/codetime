@@ -9,6 +9,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 import accounts
+import account_email
 from codetime import CodeTimeError
 
 TOKEN_LIFETIME = timedelta(days=30)
@@ -27,6 +28,7 @@ def _utc_now():
 
 def ensure_schema(connection):
     accounts.ensure_schema(connection)
+    account_email.ensure_schema(connection)
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS login_tokens (
@@ -100,7 +102,7 @@ def login(connection, email, password, current=None):
     token = secrets.token_urlsafe(32)
 
     connection.execute("DELETE FROM failed_logins WHERE email = ?", (email,))
-    connection.execute(
+    cursor = connection.execute(
         "INSERT INTO login_tokens (user_id, token_hash, created_at, expires_at) "
         "VALUES (?, ?, ?, ?)",
         (
@@ -109,6 +111,10 @@ def login(connection, email, password, current=None):
             current.isoformat(),
             (current + TOKEN_LIFETIME).isoformat(),
         ),
+    )
+    # Saved together with the login: both happen or neither does.
+    account_email.queue_login_email(
+        connection, row[0], email, cursor.lastrowid, current
     )
     connection.commit()
 
@@ -135,6 +141,7 @@ def user_for_token(connection, token, current=None):
 
     if revoked_at is not None:
         return None
+
 
     if datetime.fromisoformat(expires_at) <= current:
         return None
