@@ -107,6 +107,11 @@ def app_dir():
     return Path(custom) if custom else Path.home() / ".codetime"
 
 
+def token_path():
+    return app_dir() / "session.token"
+
+
+
 def connect():
     directory = app_dir()
     directory.mkdir(parents=True, exist_ok=True)
@@ -446,6 +451,74 @@ def ask(prompt, default=None):
     return answer or default or ""
 
 
+def cmd_register(args):
+    import accounts
+
+    email = input("Email address: ").strip()
+    password = getpass.getpass("Password (hidden): ")
+    confirmation = getpass.getpass("Confirm password (hidden): ")
+
+    if password != confirmation:
+        raise CodeTimeError("Passwords do not match.")
+
+    with connect() as connection:
+        accounts.ensure_schema(connection)
+        accounts.register(connection, email, password)
+
+    print("Account registered successfully.")
+
+
+def cmd_login(args):
+    import account_login
+
+    email = input("Email address: ").strip()
+    password = getpass.getpass("Password (hidden): ")
+
+    # Check the credentials and create a login token.
+    with connect() as connection:
+        account_login.ensure_schema(connection)
+        token = account_login.login(connection, email, password)
+
+    # Save the token in the user's private CodeTime directory.
+    path = token_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    file_descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+        0o600,
+    )
+
+    with os.fdopen(file_descriptor, "w", encoding="utf-8") as token_file:
+        token_file.write(token + "\n")
+
+    # Ensure the file has private permissions.
+    os.chmod(path, 0o600)
+
+    print("Logged in successfully.")
+
+
+def cmd_logout(args):
+    import account_login
+
+    path = token_path()
+
+    if not path.exists():
+        print("You are not logged in.")
+        return
+
+    token = path.read_text(encoding="utf-8").strip()
+
+    # Revoke the token before removing the local copy.
+    with connect() as connection:
+        account_login.ensure_schema(connection)
+        account_login.logout(connection, token)
+
+    path.unlink(missing_ok=True)
+
+    print("Logged out successfully.")
+
+
 def cmd_setup(args):
     print("Email setup. Your answers are saved in", config_path())
     print("For Gmail: turn on 2-step verification, then create an app password")
@@ -588,6 +661,12 @@ def build_parser():
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
+    commands.add_parser("register", help="create an account")
+
+    commands.add_parser("login", help="log in to your account")
+
+    commands.add_parser("logout", help="log out of your account")
+
     commands.add_parser("setup", help="set up email (one time)")
 
     start = commands.add_parser("start", help="start the timer")
@@ -631,8 +710,12 @@ HANDLERS = {
     "log": cmd_log,
     "delete": cmd_delete,
     "report": cmd_report,
-}
+    "register": cmd_register,
+    "login": cmd_login,
 
+     "logout": cmd_logout,
+
+}
 
 def main(argv=None):
     args = build_parser().parse_args(argv)

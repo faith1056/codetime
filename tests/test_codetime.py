@@ -214,6 +214,56 @@ class TestEmail(CodeTimeTestCase):
 
 class TestCli(CodeTimeTestCase):
 
+
+    def test_register_command_creates_account(self):
+        with patch("builtins.input", return_value="ada@example.com"), \
+             patch("codetime.getpass.getpass", side_effect=[
+                 "TestPassword123!",
+                 "TestPassword123!",
+             ]):
+            code, out, err = self.run_cli("register")
+
+        self.assertEqual(code, 0)
+        self.assertIn("Account registered successfully.", out)
+        self.assertEqual(err, "")
+
+    def test_register_command_rejects_mismatched_passwords(self):
+        with patch("builtins.input", return_value="ada@example.com"), \
+             patch("codetime.getpass.getpass", side_effect=[
+                 "TestPassword123!",
+                 "DifferentPassword123!",
+             ]):
+            code, out, err = self.run_cli("register")
+
+        self.assertEqual(code, 1)
+        self.assertIn("Passwords do not match.", err)
+
+
+    def test_login_command_creates_private_token_file(self):
+        with patch("builtins.input", return_value="ada@example.com"), \
+             patch("codetime.getpass.getpass", side_effect=[
+                 "TestPassword123!",
+                 "TestPassword123!",
+             ]):
+            code, _, err = self.run_cli("register")
+
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
+
+        with patch("builtins.input", return_value="ada@example.com"), \
+             patch("codetime.getpass.getpass", return_value="TestPassword123!"):
+            code, out, err = self.run_cli("login")
+
+        self.assertEqual(code, 0)
+        self.assertIn("Logged in successfully.", out)
+        self.assertEqual(err, "")
+
+        path = codetime.token_path()
+        self.assertTrue(path.exists())
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertTrue(path.read_text(encoding="utf-8").strip())
+
+
     def test_full_flow(self):
         code, out, _ = self.run_cli("start", "demo")
         self.assertEqual(code, 0)
