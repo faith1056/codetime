@@ -11,9 +11,15 @@ import tracker_engine
 import tracker_events
 import tracker_service
 from fastapi import Body, Depends, FastAPI, Header, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from urllib.parse import urlsplit
+
+
+ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
 def create_app() -> FastAPI:
@@ -39,6 +45,26 @@ def create_app() -> FastAPI:
         version="0.1.0",
         description="Track your coding time from the browser.",
     )
+
+    # Only this computer may talk to the server (stops DNS rebinding).
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+
+    @app.middleware("http")
+    async def refuse_cross_origin_writes(request, call_next):
+        """Refuse browser requests that another website started."""
+        if (
+            request.method in UNSAFE_METHODS
+            and request.url.path.startswith("/api/")
+        ):
+            origin = request.headers.get("origin")
+            if origin is not None:
+                host = request.headers.get("host", "")
+                if urlsplit(origin).netloc != host:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "Cross-origin request refused."},
+                    )
+        return await call_next(request)
 
     # Serve CSS and other static files.
     static_directory = Path(__file__).parent / "static"
