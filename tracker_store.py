@@ -37,9 +37,26 @@ class Store:
         return True
 
     def _open(self, connection, action):
-        # Never open a row while another one (e.g. a manual session) is open.
-        if codetime.active_session(connection) is not None:
-            return
+        running = codetime.active_session(connection)
+
+        if running is not None:
+            session_id, project, started = running
+
+            # The dashboard's generic session must not block automatic tracking.
+            # Close it before opening the actual detected project.
+            if project != "CodeTime dashboard":
+                return
+
+            if action.at <= started:
+                connection.execute(
+                    "DELETE FROM sessions WHERE id = ?", (session_id,)
+                )
+            else:
+                connection.execute(
+                    "UPDATE sessions SET ended_at = ? WHERE id = ?",
+                    (action.at.isoformat(), session_id),
+                )
+            connection.commit()
 
         cursor = connection.execute(
             "INSERT INTO sessions (project, started_at) VALUES (?, ?)",
