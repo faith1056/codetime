@@ -20,9 +20,12 @@ def startup(engine, lock, current=None):
     """Create the token and recover from a crash."""
     tracker_auth.get_or_create_token()
 
+    if current is None:
+        current = codetime.now()
+
     with lock:
         with closing(codetime.connect()) as connection:
-            return engine.start(connection, current or codetime.now())
+            return engine.start(connection, current)
 
 
 def _read_idle_seconds(activity_provider):

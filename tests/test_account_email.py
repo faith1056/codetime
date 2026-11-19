@@ -2,8 +2,9 @@ import contextlib
 import io
 import os
 import tempfile
+import threading
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import account_email
 import account_login
@@ -132,15 +133,55 @@ class TestLoginEmail(unittest.TestCase):
         self.assertEqual(result, (0, 0))
         self.assertEqual(recorder.sent, [])
 
+
     def test_retry_failed_makes_given_up_emails_sendable_again(self):
         self.login("ada@example.com")
+
         for _ in range(account_email.MAX_ATTEMPTS):
             account_email.send_pending(self.connection, broken_sender, T0)
-        self.assertEqual(account_email.retry_failed(self.connection), 1)
+
+        self.assertEqual(
+            account_email.retry_failed(self.connection), 1
+        )
+
+        # Retrying must preserve the previous attempt count.
+        self.assertEqual(
+            self.outbox()[0][4], account_email.MAX_ATTEMPTS
+        )
+
         recorder = Recorder()
         result = account_email.send_pending(self.connection, recorder, T0)
+
         self.assertEqual(result, (1, 0))
         self.assertEqual(self.outbox()[0][3], "sent")
+
+    def test_manual_recovery_stops_after_six_failed_attempts(self):
+        self.login("ada@example.com")
+
+        # Initial cycle: three unsuccessful attempts.
+        for _ in range(account_email.MAX_ATTEMPTS):
+            account_email.send_pending(self.connection, broken_sender, T0)
+
+        self.assertEqual(
+            self.outbox()[0][4], account_email.MAX_ATTEMPTS
+        )
+        self.assertEqual(account_email.retry_failed(self.connection), 1)
+
+        # Recovery cycle: three more unsuccessful attempts.
+        for _ in range(
+            account_email.MAX_TOTAL_ATTEMPTS - account_email.MAX_ATTEMPTS
+        ):
+            account_email.send_pending(self.connection, broken_sender, T0)
+
+        row = self.outbox()[0]
+        self.assertEqual(row[3], "failed")
+        self.assertEqual(row[4], account_email.MAX_TOTAL_ATTEMPTS)
+
+        # Further manual retries must not restart the cycle.
+        self.assertEqual(account_email.retry_failed(self.connection), 0)
+        row = self.outbox()[0]
+        self.assertEqual(row[3], "failed")
+        self.assertEqual(row[4], account_email.MAX_TOTAL_ATTEMPTS)
 
     def test_one_failure_does_not_block_the_others(self):
         self.login("ada@example.com")
@@ -155,6 +196,163 @@ class TestLoginEmail(unittest.TestCase):
         result = account_email.send_pending(self.connection, picky, T0)
         self.assertEqual(result, (1, 1))
         self.assertEqual(delivered, ["bob@example.com"])
+
+
+    def test_stale_claim_is_recovered(self):
+        self.login("ada@example.com")
+
+        row_id = self.connection.execute(
+            "SELECT id FROM email_outbox ORDER BY id LIMIT 1"
+        ).fetchone()[0]
+
+        stale_time = (
+            T0 - timedelta(seconds=account_email.CLAIM_TIMEOUT_SECONDS + 1)
+        ).isoformat()
+
+        self.connection.execute(
+            """
+            UPDATE email_outbox
+            SET status = 'sending', claimed_at = ?
+            WHERE id = ?
+            """,
+            (stale_time, row_id),
+        )
+        self.connection.commit()
+
+        sender = Recorder()
+        result = account_email.send_pending(
+            self.connection, sender, current=T0
+        )
+
+        self.assertEqual(result, (1, 0))
+        self.assertEqual(len(sender.sent), 1)
+        self.assertEqual(self.outbox()[0][3], "sent")
+
+    def test_concurrent_workers_do_not_send_same_claimed_email(self):
+        self.login("ada@example.com")
+
+        first_started = threading.Event()
+        release_first = threading.Event()
+        first_messages = []
+        first_result = []
+        first_errors = []
+
+        def blocking_sender(to_email, subject, body):
+            first_messages.append((to_email, subject, body))
+            first_started.set()
+            if not release_first.wait(timeout=5):
+                raise TimeoutError("Test sender was not released")
+
+        def run_first_worker():
+            connection = codetime.connect()
+            try:
+                first_result.append(
+                    account_email.send_pending(
+                        connection, blocking_sender, current=T0
+                    )
+                )
+            except Exception as error:
+                first_errors.append(error)
+            finally:
+                connection.close()
+
+        worker = threading.Thread(target=run_first_worker)
+        worker.start()
+
+        try:
+            self.assertTrue(
+                first_started.wait(timeout=5),
+                "The first worker did not begin sending",
+            )
+
+            second_sender = Recorder()
+            second_result = account_email.send_pending(
+                self.connection, second_sender, current=T0
+            )
+
+            self.assertEqual(second_result, (0, 0))
+            self.assertEqual(second_sender.sent, [])
+        finally:
+            release_first.set()
+            worker.join(timeout=10)
+
+        self.assertFalse(worker.is_alive(), "The first worker did not finish")
+        self.assertEqual(first_errors, [])
+        self.assertEqual(first_result, [(1, 0)])
+        self.assertEqual(len(first_messages), 1)
+
+    def test_email_status_shows_counts_without_changing_queue(self):
+        self.login("ada@example.com")
+        self.login("bob@example.com")
+
+        with codetime.connect() as connection:
+            rows = connection.execute(
+                "SELECT id, user_id, to_email, subject, body, created_at "
+                "FROM email_outbox ORDER BY id"
+            ).fetchall()
+            self.assertEqual(len(rows), 2)
+
+            # Keep Ada's message pending and mark Bob's as sending.
+            connection.execute(
+                "UPDATE email_outbox SET status = 'sending' WHERE id = ?",
+                (rows[1][0],),
+            )
+
+            # Add two test messages using the real outbox column names.
+            for row, status, dedupe_key in (
+                (rows[0], "sent", "test-email-status:sent"),
+                (rows[1], "failed", "test-email-status:failed"),
+            ):
+                connection.execute(
+                    """
+                    INSERT INTO email_outbox
+                    (user_id, to_email, subject, body, dedupe_key,
+                     status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        row[1], row[2], row[3], row[4],
+                        dedupe_key, status, row[5],
+                    ),
+                )
+
+            before = connection.execute(
+                "SELECT id, status, attempts, claimed_at "
+                "FROM email_outbox ORDER BY id"
+            ).fetchall()
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            codetime.cmd_email_status(None)
+
+        for expected in (
+            "Pending: 1", "Sending: 1", "Sent:    1",
+            "Failed:  1", "Total:   4",
+        ):
+            self.assertIn(expected, output.getvalue())
+
+        with codetime.connect() as connection:
+            after = connection.execute(
+                "SELECT id, status, attempts, claimed_at "
+                "FROM email_outbox ORDER BY id"
+            ).fetchall()
+
+        self.assertEqual(before, after)
+
+    def test_email_status_handles_empty_queue(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            codetime.cmd_email_status(None)
+
+        for expected in (
+            "Pending: 0", "Sending: 0", "Sent:    0",
+            "Failed:  0", "Total:   0",
+        ):
+            self.assertIn(expected, output.getvalue())
+
+    def test_email_status_is_registered_in_cli(self):
+        args = codetime.build_parser().parse_args(["email-status"])
+        self.assertEqual(args.command, "email-status")
 
     def test_print_sender_shows_the_email(self):
         buffer = io.StringIO()

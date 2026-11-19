@@ -124,6 +124,25 @@ class TestEngine(unittest.TestCase):
             self.rows(), [("alpha", t(0).isoformat(), t(2).isoformat())]
         )
 
+
+    def test_automatic_tracking_replaces_generic_dashboard_session(self):
+        self.connection.execute(
+            "INSERT INTO sessions (project, started_at) VALUES (?, ?)",
+            ("CodeTime dashboard", t(0).isoformat()),
+        )
+        self.connection.commit()
+
+        self.engine.activity(self.connection, "alpha", t(1))
+
+        self.assertEqual(
+            self.rows(),
+            [
+                ("CodeTime dashboard", t(0).isoformat(), t(1).isoformat()),
+                ("alpha", t(1).isoformat(), None),
+            ],
+        )
+        self.assertEqual(self.engine.tracker.state.name, "ACTIVE")
+
     def test_manual_session_while_idle_keeps_state_consistent(self):
         self.engine.activity(self.connection, "alpha", t(0))
         self.engine.activity(self.connection, "alpha", t(2))

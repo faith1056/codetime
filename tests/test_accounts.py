@@ -83,7 +83,7 @@ class TestAccounts(unittest.TestCase):
             row[1]
             for row in self.connection.execute("PRAGMA table_info(sessions)")
         ]
-        self.assertEqual(columns, ["id", "project", "started_at", "ended_at"])
+        self.assertEqual(columns, ["id", "project", "started_at", "ended_at", "user_id"])
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from codetime import CodeTimeError
 
 MAX_ATTEMPTS = 3
+MAX_TOTAL_ATTEMPTS = 6
 MAX_ERROR_LENGTH = 200
 
 
@@ -24,12 +25,27 @@ def ensure_schema(connection):
             dedupe_key TEXT NOT NULL UNIQUE,
             status TEXT NOT NULL DEFAULT 'pending',
             attempts INTEGER NOT NULL DEFAULT 0,
+            recovery_attempts INTEGER NOT NULL DEFAULT 0,
             last_error TEXT,
             created_at TEXT NOT NULL,
-            sent_at TEXT
+            sent_at TEXT,
+            claimed_at TEXT
         )
         """
     )
+
+    columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(email_outbox)")
+    }
+    if "claimed_at" not in columns:
+        connection.execute("ALTER TABLE email_outbox ADD COLUMN claimed_at TEXT")
+    if "recovery_attempts" not in columns:
+        connection.execute(
+            "ALTER TABLE email_outbox ADD COLUMN recovery_attempts "
+            "INTEGER NOT NULL DEFAULT 0"
+        )
+
     connection.commit()
 
 
@@ -73,38 +89,76 @@ def _describe(error):
     return text[:MAX_ERROR_LENGTH]
 
 
-def send_pending(connection, sender, current=None):
-    """Try to send every pending email. Returns (sent, failed) for this run.
+CLAIM_TIMEOUT_SECONDS = 600
 
-    sender is a function: sender(to_email, subject, body).
+
+def send_pending(connection, sender, current=None):
+    """Send queued emails one at a time, claiming each before delivery.
+
+    Stale claims are recovered after ten minutes. A crash after the email
+    provider accepts a message can still result in duplicate delivery.
     """
     current = current or datetime.now(timezone.utc)
-
-    rows = connection.execute(
-        "SELECT id, to_email, subject, body, attempts "
-        "FROM email_outbox WHERE status = 'pending' ORDER BY id"
-    ).fetchall()
-
     sent = 0
     failed = 0
 
-    for row_id, to_email, subject, body, attempts in rows:
+    stale_before = (
+        current.timestamp() - CLAIM_TIMEOUT_SECONDS
+    )
+    stale_time = datetime.fromtimestamp(
+        stale_before, timezone.utc
+    ).isoformat()
+
+    connection.execute("BEGIN IMMEDIATE")
+    connection.execute(
+        "UPDATE email_outbox SET status = 'pending', claimed_at = NULL "
+        "WHERE status = 'sending' AND claimed_at < ?",
+        (stale_time,),
+    )
+    connection.commit()
+
+    processed = set()
+
+    while True:
+        connection.execute("BEGIN IMMEDIATE")
+        rows = connection.execute(
+            "SELECT id, to_email, subject, body, attempts, recovery_attempts "
+            "FROM email_outbox WHERE status = 'pending' ORDER BY id"
+        ).fetchall()
+
+        row = next((item for item in rows if item[0] not in processed), None)
+
+        if row is None:
+            connection.commit()
+            break
+
+        row_id, to_email, subject, body, attempts, recovery_attempts = row
+        processed.add(row_id)
+        connection.execute(
+            "UPDATE email_outbox SET status = 'sending', claimed_at = ? "
+            "WHERE id = ? AND status = 'pending'",
+            (current.isoformat(), row_id),
+        )
+        connection.commit()
+
         try:
             sender(to_email, subject, body)
         except Exception as error:
             attempts += 1
-            status = "failed" if attempts >= MAX_ATTEMPTS else "pending"
+            attempt_limit = (
+                MAX_TOTAL_ATTEMPTS if recovery_attempts else MAX_ATTEMPTS
+            )
+            status = "failed" if attempts >= attempt_limit else "pending"
             connection.execute(
-                "UPDATE email_outbox "
-                "SET status = ?, attempts = ?, last_error = ? WHERE id = ?",
+                "UPDATE email_outbox SET status = ?, attempts = ?, "
+                "last_error = ?, claimed_at = NULL WHERE id = ?",
                 (status, attempts, _describe(error), row_id),
             )
             failed += 1
         else:
             connection.execute(
-                "UPDATE email_outbox "
-                "SET status = 'sent', attempts = ?, sent_at = ?, "
-                "last_error = NULL WHERE id = ?",
+                "UPDATE email_outbox SET status = 'sent', attempts = ?, "
+                "sent_at = ?, last_error = NULL, claimed_at = NULL WHERE id = ?",
                 (attempts + 1, current.isoformat(), row_id),
             )
             sent += 1
@@ -115,14 +169,14 @@ def send_pending(connection, sender, current=None):
 
 
 def retry_failed(connection):
-    """Put emails we gave up on back in the queue. Returns how many."""
+    """Requeue failed emails below the total attempt limit."""
     cursor = connection.execute(
-        "UPDATE email_outbox SET status = 'pending', attempts = 0 "
-        "WHERE status = 'failed'"
+        "UPDATE email_outbox SET status = 'pending', recovery_attempts = 1 "
+        "WHERE status = 'failed' AND attempts < ?",
+        (MAX_TOTAL_ATTEMPTS,),
     )
     connection.commit()
     return cursor.rowcount
-
 
 def print_sender(to_email, subject, body):
     """A sender that only prints. Nothing is really sent."""
