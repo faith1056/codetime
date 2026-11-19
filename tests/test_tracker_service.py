@@ -5,12 +5,14 @@ import threading
 import unittest
 from contextlib import closing
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 import codetime
 import tracker_auth
 import tracker_service
 import tracker_store
 from tracker_engine import Engine
+
 
 BASE = datetime(2026, 11, 3, 9, 0, 0)
 
@@ -29,7 +31,7 @@ class TestService(unittest.TestCase):
 
     def tearDown(self):
         if self.old_home is None:
-            del os.environ["CODETIME_HOME"]
+            os.environ.pop("CODETIME_HOME", None)
         else:
             os.environ["CODETIME_HOME"] = self.old_home
         self.folder.cleanup()
@@ -59,17 +61,22 @@ class TestService(unittest.TestCase):
                 ("alpha", t(0).isoformat()),
             )
             connection.commit()
+
         tracker_store.write_last_seen(t(20))
         result = tracker_service.startup(self.engine, self.lock, t(60))
+
         self.assertEqual(result, "closed")
         self.assertEqual(
-            self.rows(), [("alpha", t(0).isoformat(), t(20).isoformat())]
+            self.rows(),
+            [("alpha", t(0).isoformat(), t(20).isoformat())],
         )
 
     def test_startup_leaves_a_manual_session_alone(self):
         with closing(codetime.connect()) as connection:
             codetime.start_session(connection, "manual")
+
         result = tracker_service.startup(self.engine, self.lock, t(60))
+
         self.assertIsNone(result)
         self.assertIsNone(self.rows()[0][2])
 
@@ -77,17 +84,66 @@ class TestService(unittest.TestCase):
         with closing(codetime.connect()) as connection:
             self.engine.activity(connection, "alpha", t(0))
             self.engine.activity(connection, "alpha", t(2))
+
         tracker_service.tick_once(self.engine, self.lock, t(8))
+
         self.assertEqual(
-            self.rows(), [("alpha", t(0).isoformat(), t(2).isoformat())]
+            self.rows(),
+            [("alpha", t(0).isoformat(), t(2).isoformat())],
         )
 
     def test_tick_before_idle_limit_changes_nothing(self):
         with closing(codetime.connect()) as connection:
             self.engine.activity(connection, "alpha", t(0))
+
         tracker_service.tick_once(self.engine, self.lock, t(4))
+
         self.assertIsNone(self.rows()[0][2])
 
+    def test_recent_system_activity_prevents_false_idle_timeout(self):
+        with closing(codetime.connect()) as connection:
+            self.engine.activity(connection, "alpha", t(0))
+
+        tracker_service.tick_once(
+            self.engine,
+            self.lock,
+            current=None,
+            activity_provider=lambda: 60,
+        )
+
+        self.assertIsNone(self.rows()[0][2])
+
+    def test_unavailable_activity_provider_does_not_crash_tracking(self):
+        with closing(codetime.connect()) as connection:
+            self.engine.activity(connection, "alpha", t(0))
+
+        with patch("tracker_service.codetime.now", return_value=t(2)):
+            tracker_service.tick_once(
+                self.engine,
+                self.lock,
+                current=None,
+                activity_provider=lambda: None,
+            )
+
+        self.assertEqual(len(self.rows()), 1)
+
+    def test_explicit_test_time_does_not_call_activity_provider(self):
+        with closing(codetime.connect()) as connection:
+            self.engine.activity(connection, "alpha", t(0))
+
+        def unexpected_provider_call():
+            raise AssertionError(
+                "Provider should not be called with explicit time"
+            )
+
+        tracker_service.tick_once(
+            self.engine,
+            self.lock,
+            current=t(2),
+            activity_provider=unexpected_provider_call,
+        )
+
+        self.assertIsNone(self.rows()[0][2])
 
 
 if __name__ == "__main__":
