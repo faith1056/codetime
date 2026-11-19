@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from codetime import CodeTimeError
 
 MAX_ATTEMPTS = 3
+MAX_TOTAL_ATTEMPTS = 6
 MAX_ERROR_LENGTH = 200
 
 
@@ -24,6 +25,7 @@ def ensure_schema(connection):
             dedupe_key TEXT NOT NULL UNIQUE,
             status TEXT NOT NULL DEFAULT 'pending',
             attempts INTEGER NOT NULL DEFAULT 0,
+            recovery_attempts INTEGER NOT NULL DEFAULT 0,
             last_error TEXT,
             created_at TEXT NOT NULL,
             sent_at TEXT,
@@ -38,6 +40,11 @@ def ensure_schema(connection):
     }
     if "claimed_at" not in columns:
         connection.execute("ALTER TABLE email_outbox ADD COLUMN claimed_at TEXT")
+    if "recovery_attempts" not in columns:
+        connection.execute(
+            "ALTER TABLE email_outbox ADD COLUMN recovery_attempts "
+            "INTEGER NOT NULL DEFAULT 0"
+        )
 
     connection.commit()
 
@@ -115,7 +122,7 @@ def send_pending(connection, sender, current=None):
     while True:
         connection.execute("BEGIN IMMEDIATE")
         rows = connection.execute(
-            "SELECT id, to_email, subject, body, attempts "
+            "SELECT id, to_email, subject, body, attempts, recovery_attempts "
             "FROM email_outbox WHERE status = 'pending' ORDER BY id"
         ).fetchall()
 
@@ -125,7 +132,7 @@ def send_pending(connection, sender, current=None):
             connection.commit()
             break
 
-        row_id, to_email, subject, body, attempts = row
+        row_id, to_email, subject, body, attempts, recovery_attempts = row
         processed.add(row_id)
         connection.execute(
             "UPDATE email_outbox SET status = 'sending', claimed_at = ? "
@@ -138,7 +145,10 @@ def send_pending(connection, sender, current=None):
             sender(to_email, subject, body)
         except Exception as error:
             attempts += 1
-            status = "failed" if attempts >= MAX_ATTEMPTS else "pending"
+            attempt_limit = (
+                MAX_TOTAL_ATTEMPTS if recovery_attempts else MAX_ATTEMPTS
+            )
+            status = "failed" if attempts >= attempt_limit else "pending"
             connection.execute(
                 "UPDATE email_outbox SET status = ?, attempts = ?, "
                 "last_error = ?, claimed_at = NULL WHERE id = ?",
@@ -159,10 +169,11 @@ def send_pending(connection, sender, current=None):
 
 
 def retry_failed(connection):
-    """Requeue failed emails while preserving their attempt history."""
+    """Requeue failed emails below the total attempt limit."""
     cursor = connection.execute(
-        "UPDATE email_outbox SET status = 'pending' "
-        "WHERE status = 'failed'"
+        "UPDATE email_outbox SET status = 'pending', recovery_attempts = 1 "
+        "WHERE status = 'failed' AND attempts < ?",
+        (MAX_TOTAL_ATTEMPTS,),
     )
     connection.commit()
     return cursor.rowcount

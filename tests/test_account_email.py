@@ -155,6 +155,34 @@ class TestLoginEmail(unittest.TestCase):
         self.assertEqual(result, (1, 0))
         self.assertEqual(self.outbox()[0][3], "sent")
 
+    def test_manual_recovery_stops_after_six_failed_attempts(self):
+        self.login("ada@example.com")
+
+        # Initial cycle: three unsuccessful attempts.
+        for _ in range(account_email.MAX_ATTEMPTS):
+            account_email.send_pending(self.connection, broken_sender, T0)
+
+        self.assertEqual(
+            self.outbox()[0][4], account_email.MAX_ATTEMPTS
+        )
+        self.assertEqual(account_email.retry_failed(self.connection), 1)
+
+        # Recovery cycle: three more unsuccessful attempts.
+        for _ in range(
+            account_email.MAX_TOTAL_ATTEMPTS - account_email.MAX_ATTEMPTS
+        ):
+            account_email.send_pending(self.connection, broken_sender, T0)
+
+        row = self.outbox()[0]
+        self.assertEqual(row[3], "failed")
+        self.assertEqual(row[4], account_email.MAX_TOTAL_ATTEMPTS)
+
+        # Further manual retries must not restart the cycle.
+        self.assertEqual(account_email.retry_failed(self.connection), 0)
+        row = self.outbox()[0]
+        self.assertEqual(row[3], "failed")
+        self.assertEqual(row[4], account_email.MAX_TOTAL_ATTEMPTS)
+
     def test_one_failure_does_not_block_the_others(self):
         self.login("ada@example.com")
         self.login("bob@example.com")
