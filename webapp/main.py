@@ -131,7 +131,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/start", tags=["sessions"])
     def start_web_session(request: "StartSessionRequest") -> dict:
-        """Start a session using CodeTime's existing session logic."""
+        """Start a manual session and pause automatic tracking."""
 
         project = request.project.strip()
 
@@ -142,11 +142,18 @@ def create_app() -> FastAPI:
             )
 
         try:
-            with closing(codetime.connect()) as connection:
-                started = codetime.start_session(
-                    connection,
-                    project,
-                )
+            with engine_lock:
+                with closing(codetime.connect()) as connection:
+                    engine.pause(connection, codetime.now())
+
+                    try:
+                        started = codetime.start_session(
+                            connection,
+                            project,
+                        )
+                    except codetime.CodeTimeError:
+                        engine.resume(codetime.now())
+                        raise
 
         except codetime.CodeTimeError as error:
             raise HTTPException(
@@ -162,13 +169,16 @@ def create_app() -> FastAPI:
 
     @app.post("/api/stop", tags=["sessions"])
     def stop_web_session() -> dict:
-        """Stop the active session using CodeTime's existing logic."""
+        """Stop a manual session and allow automatic tracking to resume."""
 
         try:
-            with closing(codetime.connect()) as connection:
-                project, started, ended = codetime.stop_session(
-                    connection
-                )
+            with engine_lock:
+                with closing(codetime.connect()) as connection:
+                    project, started, ended = codetime.stop_session(
+                        connection
+                    )
+
+                engine.resume(codetime.now())
 
         except codetime.CodeTimeError as error:
             raise HTTPException(
@@ -187,7 +197,6 @@ def create_app() -> FastAPI:
             "ended_at": ended.isoformat(),
             "duration_seconds": duration_seconds,
         }
-    
 
     @app.get("/api/sessions", tags=["sessions"])
     def recent_sessions() -> dict:
