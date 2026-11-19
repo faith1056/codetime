@@ -159,14 +159,13 @@ def send_pending(connection, sender, current=None):
 
 
 def retry_failed(connection):
-    """Put emails we gave up on back in the queue. Returns how many."""
+    """Requeue failed emails while preserving their attempt history."""
     cursor = connection.execute(
-        "UPDATE email_outbox SET status = 'pending', attempts = 0 "
+        "UPDATE email_outbox SET status = 'pending' "
         "WHERE status = 'failed'"
     )
     connection.commit()
     return cursor.rowcount
-
 
 def print_sender(to_email, subject, body):
     """A sender that only prints. Nothing is really sent."""
