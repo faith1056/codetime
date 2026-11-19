@@ -384,12 +384,11 @@ def save_config(config):
     os.chmod(path, 0o600)
 
 
-def send_email(subject, body, config):
-    missing = [
-        key
-        for key in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "EMAIL_TO")
-        if not config.get(key)
-    ]
+def send_email(subject, body, config, to_email=None):
+    required = ["SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"]
+    if to_email is None:
+        required.append("EMAIL_TO")
+    missing = [key for key in required if not config.get(key)]
 
     if missing:
         raise CodeTimeError(
@@ -406,7 +405,7 @@ def send_email(subject, body, config):
     message = EmailMessage()
     message["Subject"] = subject
     message["From"] = config.get("EMAIL_FROM") or config["SMTP_USER"]
-    message["To"] = config["EMAIL_TO"]
+    message["To"] = to_email if to_email is not None else config["EMAIL_TO"]
     message.set_content(body)
 
     context = ssl.create_default_context()
@@ -517,6 +516,42 @@ def cmd_logout(args):
     path.unlink(missing_ok=True)
 
     print("Logged out successfully.")
+
+
+
+def cmd_email_send(args):
+    import account_email
+
+    config = load_config()
+    required = ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD")
+    if any(not config.get(key) for key in required):
+        raise CodeTimeError(
+            "Email is not set up yet. Run 'codetime setup' first."
+        )
+
+    try:
+        int(config.get("SMTP_PORT") or 587)
+    except ValueError:
+        raise CodeTimeError("SMTP_PORT must be a number.") from None
+
+    def sender(to_email, subject, body):
+        send_email(subject, body, config, to_email=to_email)
+
+    with connect() as connection:
+        account_email.ensure_schema(connection)
+        sent, failed = account_email.send_pending(connection, sender)
+
+    print(f"Email queue processed: {sent} sent, {failed} failed.")
+
+
+def cmd_email_retry(args):
+    import account_email
+
+    with connect() as connection:
+        account_email.ensure_schema(connection)
+        count = account_email.retry_failed(connection)
+
+    print(f"Reset {count} failed email(s) to pending.")
 
 
 def cmd_setup(args):
@@ -666,6 +701,8 @@ def build_parser():
     commands.add_parser("login", help="log in to your account")
 
     commands.add_parser("logout", help="log out of your account")
+    commands.add_parser("email-send", help="send queued account emails")
+    commands.add_parser("email-retry", help="retry failed account emails")
 
     commands.add_parser("setup", help="set up email (one time)")
 
@@ -715,6 +752,8 @@ HANDLERS = {
 
      "logout": cmd_logout,
 
+     "email-send": cmd_email_send,
+     "email-retry": cmd_email_retry,
 }
 
 def main(argv=None):
