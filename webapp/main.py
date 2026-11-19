@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager, closing
 import threading
 from pathlib import Path
 
+import account_login
 import codetime
 import tracker_auth
 import tracker_engine
@@ -91,13 +92,36 @@ def create_app() -> FastAPI:
 
         return {"status": "ok"}
 
+    def require_account(
+        x_codetime_account_token: str | None = Header(default=None),
+    ) -> int:
+        """Require a valid CodeTime account login token."""
+        with closing(codetime.connect()) as connection:
+            account_login.ensure_schema(connection)
+            user_id = account_login.user_for_token(
+                connection,
+                x_codetime_account_token,
+            )
+
+        if user_id is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Missing or invalid account login token.",
+            )
+
+        return user_id
+
     @app.get("/api/status", tags=["sessions"])
-    def session_status() -> dict:
+    def session_status(
+        user_id: int = Depends(require_account),
+    ) -> dict:
         """Return the current session and today's coding time."""
 
         with closing(codetime.connect()) as connection:
             current = codetime.now()
-            running = codetime.active_session(connection)
+            running = codetime.active_session(
+                connection, user_id=user_id
+            )
 
             start, end, _ = codetime.period_range("today", current)
 
@@ -107,6 +131,7 @@ def create_app() -> FastAPI:
                     start,
                     end,
                     current,
+                    user_id=user_id,
                 )
             )
 
@@ -130,7 +155,10 @@ def create_app() -> FastAPI:
         }
 
     @app.post("/api/start", tags=["sessions"])
-    def start_web_session(request: "StartSessionRequest") -> dict:
+    def start_web_session(
+        request: "StartSessionRequest",
+        user_id: int = Depends(require_account),
+    ) -> dict:
         """Start a manual session and pause automatic tracking."""
 
         project = request.project.strip()
@@ -150,6 +178,7 @@ def create_app() -> FastAPI:
                         started = codetime.start_session(
                             connection,
                             project,
+                            user_id=user_id,
                         )
                     except codetime.CodeTimeError:
                         engine.resume(codetime.now())
@@ -168,14 +197,17 @@ def create_app() -> FastAPI:
         }
 
     @app.post("/api/stop", tags=["sessions"])
-    def stop_web_session() -> dict:
+    def stop_web_session(
+        user_id: int = Depends(require_account),
+    ) -> dict:
         """Stop a manual session and allow automatic tracking to resume."""
 
         try:
             with engine_lock:
                 with closing(codetime.connect()) as connection:
                     project, started, ended = codetime.stop_session(
-                        connection
+                        connection,
+                        user_id=user_id,
                     )
 
                 engine.resume(codetime.now())
@@ -199,11 +231,15 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/api/sessions", tags=["sessions"])
-    def recent_sessions() -> dict:
+    def recent_sessions(
+        user_id: int = Depends(require_account),
+    ) -> dict:
         """Return the ten most recent coding sessions."""
 
         with closing(codetime.connect()) as connection:
-            sessions = codetime.list_sessions(connection, 10)
+            sessions = codetime.list_sessions(
+                connection, 10, user_id=user_id
+            )
 
         results = []
 

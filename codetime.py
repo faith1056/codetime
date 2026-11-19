@@ -111,6 +111,26 @@ def token_path():
     return app_dir() / "session.token"
 
 
+def require_cli_user_id(connection):
+    """Return the authenticated CLI account or reject the command."""
+    import account_login
+
+    path = token_path()
+    if not path.is_file():
+        raise CodeTimeError(
+            "Please log in first with 'codetime login'."
+        )
+
+    token = path.read_text(encoding="utf-8").strip()
+    account_login.ensure_schema(connection)
+    user_id = account_login.user_for_token(connection, token)
+    if user_id is None:
+        raise CodeTimeError(
+            "Your login is invalid or expired. Run 'codetime login' again."
+        )
+    return user_id
+
+
 
 def connect():
     directory = app_dir()
@@ -123,19 +143,40 @@ def connect():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project TEXT NOT NULL,
             started_at TEXT NOT NULL,
-            ended_at TEXT
+            ended_at TEXT,
+            user_id INTEGER REFERENCES users(id)
         )
         """
     )
+
+    # Migrate existing databases without deleting historical sessions.
+    columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(sessions)")
+    }
+    if "user_id" not in columns:
+        connection.execute(
+            "ALTER TABLE sessions ADD COLUMN user_id INTEGER REFERENCES users(id)"
+        )
+        connection.commit()
+
     return connection
 
 
-def active_session(connection):
-    """Return (id, project, started_at) for the running session, or None."""
-    row = connection.execute(
-        "SELECT id, project, started_at FROM sessions "
-        "WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1"
-    ).fetchone()
+def active_session(connection, user_id=None):
+    """Return a running session, optionally restricted to one account."""
+    if user_id is None:
+        row = connection.execute(
+            "SELECT id, project, started_at FROM sessions "
+            "WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    else:
+        row = connection.execute(
+            "SELECT id, project, started_at FROM sessions "
+            "WHERE ended_at IS NULL AND user_id = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
 
     if row is None:
         return None
@@ -143,8 +184,8 @@ def active_session(connection):
     return row[0], row[1], datetime.fromisoformat(row[2])
 
 
-def start_session(connection, project):
-    running = active_session(connection)
+def start_session(connection, project, user_id=None):
+    running = active_session(connection, user_id=user_id)
 
     if running:
         raise CodeTimeError(
@@ -155,8 +196,9 @@ def start_session(connection, project):
     started = now()
 
     connection.execute(
-        "INSERT INTO sessions (project, started_at) VALUES (?, ?)",
-        (project, started.isoformat()),
+        "INSERT INTO sessions (project, started_at, user_id) "
+        "VALUES (?, ?, ?)",
+        (project, started.isoformat(), user_id),
     )
     connection.commit()
 
@@ -195,8 +237,8 @@ def resolve_stop_time(started, at_text, current):
     return candidate
 
 
-def stop_session(connection, at=None):
-    running = active_session(connection)
+def stop_session(connection, at=None, user_id=None):
+    running = active_session(connection, user_id=user_id)
 
     if running is None:
         raise CodeTimeError("No session is running. Start one with 'codetime start'.")
@@ -213,13 +255,20 @@ def stop_session(connection, at=None):
     return project, started, ended
 
 
-def list_sessions(connection, limit):
+def list_sessions(connection, limit, user_id=None):
     """Return the newest sessions as (id, project, started, ended or None)."""
-    rows = connection.execute(
-        "SELECT id, project, started_at, ended_at FROM sessions "
-        "ORDER BY id DESC LIMIT ?",
-        (limit,),
-    ).fetchall()
+    if user_id is None:
+        rows = connection.execute(
+            "SELECT id, project, started_at, ended_at FROM sessions "
+            "ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    else:
+        rows = connection.execute(
+            "SELECT id, project, started_at, ended_at FROM sessions "
+            "WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
 
     return [
         (
@@ -232,11 +281,18 @@ def list_sessions(connection, limit):
     ]
 
 
-def get_session(connection, session_id):
-    row = connection.execute(
-        "SELECT id, project, started_at, ended_at FROM sessions WHERE id = ?",
-        (session_id,),
-    ).fetchone()
+def get_session(connection, session_id, user_id=None):
+    if user_id is None:
+        row = connection.execute(
+            "SELECT id, project, started_at, ended_at FROM sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+    else:
+        row = connection.execute(
+            "SELECT id, project, started_at, ended_at FROM sessions "
+            "WHERE id = ? AND user_id = ?",
+            (session_id, user_id),
+        ).fetchone()
 
     if row is None:
         raise CodeTimeError(
@@ -251,22 +307,35 @@ def get_session(connection, session_id):
     )
 
 
-def delete_session(connection, session_id):
-    get_session(connection, session_id)
+def delete_session(connection, session_id, user_id=None):
+    get_session(connection, session_id, user_id=user_id)
 
-    connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+    if user_id is None:
+        connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+    else:
+        connection.execute(
+            "DELETE FROM sessions WHERE id = ? AND user_id = ?",
+            (session_id, user_id),
+        )
     connection.commit()
 
 
-def collect_segments(connection, start, end, current):
+def collect_segments(connection, start, end, current, user_id=None):
     """Return (session_id, project, day, seconds) pieces inside [start, end).
 
     Sessions that cross midnight are split so each day gets its own time.
     A running session counts up to the current moment.
     """
-    rows = connection.execute(
-        "SELECT id, project, started_at, ended_at FROM sessions"
-    ).fetchall()
+    if user_id is None:
+        rows = connection.execute(
+            "SELECT id, project, started_at, ended_at FROM sessions"
+        ).fetchall()
+    else:
+        rows = connection.execute(
+            "SELECT id, project, started_at, ended_at FROM sessions "
+            "WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
 
     segments = []
 
@@ -431,9 +500,11 @@ def send_email(subject, body, config, to_email=None):
         raise CodeTimeError(f"Could not send the email: {error}") from None
 
 
-def email_report(connection, period):
+def email_report(connection, period, user_id):
     start, end, label = period_range(period, now())
-    segments = collect_segments(connection, start, end, now())
+    segments = collect_segments(
+        connection, start, end, now(), user_id=user_id
+    )
     report = build_report(segments, label)
 
     subject = f"Code time report: {label} - {format_duration(total_seconds(segments))}"
@@ -612,18 +683,24 @@ def cmd_start(args):
     project = args.project or Path.cwd().name
 
     with connect() as connection:
-        started = start_session(connection, project)
+        user_id = require_cli_user_id(connection)
+        started = start_session(connection, project, user_id=user_id)
 
     print(f"Started '{project}' at {started:%H:%M}. Happy coding.")
 
 
 def cmd_status(args):
     with connect() as connection:
-        running = active_session(connection)
+        user_id = require_cli_user_id(connection)
+        running = active_session(connection, user_id=user_id)
         current = now()
 
         start, end, _ = period_range("today", current)
-        today_total = total_seconds(collect_segments(connection, start, end, current))
+        today_total = total_seconds(
+            collect_segments(
+                connection, start, end, current, user_id=user_id
+            )
+        )
 
     if running is None:
         print("No session is running.")
@@ -640,7 +717,10 @@ def cmd_status(args):
 
 def cmd_stop(args):
     with connect() as connection:
-        project, started, ended = stop_session(connection, args.at)
+        user_id = require_cli_user_id(connection)
+        project, started, ended = stop_session(
+            connection, args.at, user_id=user_id
+        )
         duration = (ended - started).total_seconds()
 
         print(f"Stopped '{project}'. This session: {format_duration(duration)}.")
@@ -653,7 +733,7 @@ def cmd_stop(args):
 
         if args.email:
             try:
-                email_report(connection, "today")
+                email_report(connection, "today", user_id=user_id)
             except CodeTimeError as error:
                 print("Your session was saved, but the report was not sent.")
                 raise error
@@ -663,9 +743,12 @@ def cmd_stop(args):
 
 def cmd_report(args):
     with connect() as connection:
+        user_id = require_cli_user_id(connection)
         current = now()
         start, end, label = period_range(args.period, current)
-        segments = collect_segments(connection, start, end, current)
+        segments = collect_segments(
+            connection, start, end, current, user_id=user_id
+        )
         report = build_report(segments, label)
 
         print(report)
@@ -681,7 +764,8 @@ def cmd_report(args):
 
 def cmd_log(args):
     with connect() as connection:
-        sessions = list_sessions(connection, args.number)
+        user_id = require_cli_user_id(connection)
+        sessions = list_sessions(connection, args.number, user_id=user_id)
 
     if not sessions:
         print("No sessions recorded yet.")
@@ -705,7 +789,10 @@ def cmd_log(args):
 
 def cmd_delete(args):
     with connect() as connection:
-        session_id, project, started, _ = get_session(connection, args.id)
+        user_id = require_cli_user_id(connection)
+        session_id, project, started, _ = get_session(
+            connection, args.id, user_id=user_id
+        )
 
         if not args.yes:
             answer = input(
@@ -717,7 +804,7 @@ def cmd_delete(args):
                 print("Nothing deleted.")
                 return
 
-        delete_session(connection, session_id)
+        delete_session(connection, session_id, user_id=user_id)
 
     print(f"Deleted session {session_id}.")
 

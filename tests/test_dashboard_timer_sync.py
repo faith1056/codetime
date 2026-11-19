@@ -2,6 +2,8 @@ import os
 import tempfile
 import unittest
 
+import account_login
+import accounts
 import codetime
 import tracker_auth
 
@@ -23,8 +25,22 @@ class TestDashboardTimerSync(unittest.TestCase):
             create_app(),
             base_url="http://127.0.0.1",
         )
+        with codetime.connect() as connection:
+            account_login.ensure_schema(connection)
+            accounts.register(
+                connection,
+                "timer-test@example.com",
+                "correct horse battery",
+            )
+            self.account_token = account_login.login(
+                connection,
+                "timer-test@example.com",
+                "correct horse battery",
+            )
+
         self.headers = {
-            "X-CodeTime-Token": tracker_auth.create_token()
+            "X-CodeTime-Token": tracker_auth.create_token(),
+            "X-CodeTime-Account-Token": self.account_token,
         }
 
     def tearDown(self):
@@ -60,6 +76,7 @@ class TestDashboardTimerSync(unittest.TestCase):
         response = self.client.post(
             "/api/start",
             json={"project": "Study"},
+            headers={"X-CodeTime-Account-Token": self.account_token},
         )
 
         self.assertEqual(response.status_code, 200)
@@ -77,10 +94,14 @@ class TestDashboardTimerSync(unittest.TestCase):
         started = self.client.post(
             "/api/start",
             json={"project": "Study"},
+            headers={"X-CodeTime-Account-Token": self.account_token},
         )
         self.assertEqual(started.status_code, 200)
 
-        stopped = self.client.post("/api/stop")
+        stopped = self.client.post(
+            "/api/stop",
+            headers={"X-CodeTime-Account-Token": self.account_token},
+        )
         self.assertEqual(stopped.status_code, 200)
 
         self.event("alpha")
@@ -95,6 +116,7 @@ class TestDashboardTimerSync(unittest.TestCase):
         response = self.client.post(
             "/api/start",
             json={"project": "   "},
+            headers={"X-CodeTime-Account-Token": self.account_token},
         )
 
         self.assertEqual(response.status_code, 400)

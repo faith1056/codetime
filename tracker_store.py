@@ -41,22 +41,26 @@ class Store:
 
         if running is not None:
             session_id, project, started = running
+            row = connection.execute(
+                "SELECT user_id FROM sessions WHERE id = ?",
+                (session_id,),
+            ).fetchone()
 
-            # The dashboard's generic session must not block automatic tracking.
-            # Close it before opening the actual detected project.
-            if project != "CodeTime dashboard":
-                return
-
-            if action.at <= started:
+            # Only replace the unassigned generic dashboard session.
+            if (
+                project == "CodeTime dashboard"
+                and row is not None
+                and row[0] is None
+            ):
                 connection.execute(
-                    "DELETE FROM sessions WHERE id = ?", (session_id,)
-                )
-            else:
-                connection.execute(
-                    "UPDATE sessions SET ended_at = ? WHERE id = ?",
+                    "UPDATE sessions SET ended_at = ? "
+                    "WHERE id = ? AND ended_at IS NULL AND user_id IS NULL",
                     (action.at.isoformat(), session_id),
                 )
-            connection.commit()
+                connection.commit()
+            else:
+                # Leave all other running sessions untouched.
+                return
 
         cursor = connection.execute(
             "INSERT INTO sessions (project, started_at) VALUES (?, ?)",

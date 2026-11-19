@@ -41,7 +41,52 @@ class CodeTimeTestCase(unittest.TestCase):
     def set_time(self, text):
         self.clock[0] = at(text)
 
+    def _ensure_cli_test_login(self, command):
+        # Authenticate only tests exercising account-protected CLI commands.
+        protected = {"start", "status", "stop", "report", "log", "delete"}
+        if command not in protected:
+            return
+
+        import accounts
+        import account_login
+
+        account_login.ensure_schema(self.connection)
+        path = codetime.token_path()
+
+        if path.is_file():
+            token = path.read_text(encoding="utf-8").strip()
+            if account_login.user_for_token(self.connection, token) is not None:
+                return
+
+        email = "codetime-cli-test@example.com"
+        password = "TestPassword123!"
+
+        row = self.connection.execute(
+            "SELECT id FROM users WHERE email = ?", (email,)
+        ).fetchone()
+
+        if row is None:
+            accounts.register(self.connection, email, password)
+
+        token = account_login.login(self.connection, email, password)
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(token + "\n", encoding="utf-8")
+        path.chmod(0o600)
+
+        user_id = account_login.user_for_token(self.connection, token)
+
+        # Test fixtures created directly through the storage API are legacy,
+        # unassigned rows. Associate these isolated test rows with this test
+        # account so CLI log/delete tests exercise the authenticated path.
+        self.connection.execute(
+            "UPDATE sessions SET user_id = ? WHERE user_id IS NULL",
+            (user_id,),
+        )
+        self.connection.commit()
+
     def run_cli(self, *argv):
+        self._ensure_cli_test_login(argv[0] if argv else "")
         out, err = StringIO(), StringIO()
         with redirect_stdout(out), redirect_stderr(err):
             code = codetime.main(list(argv))

@@ -3,6 +3,8 @@ import tempfile
 import unittest
 from contextlib import closing
 
+import account_login
+import accounts
 import codetime
 
 try:
@@ -23,6 +25,24 @@ class TestLocalApiGuard(unittest.TestCase):
         self.old_home = os.environ.get("CODETIME_HOME")
         os.environ["CODETIME_HOME"] = self.folder.name
         self.client = TestClient(create_app(), base_url=LOCAL)
+        with closing(codetime.connect()) as connection:
+            account_login.ensure_schema(connection)
+            accounts.register(
+                connection,
+                "guard-test@example.com",
+                "correct horse battery",
+            )
+            self.account_token = account_login.login(
+                connection,
+                "guard-test@example.com",
+                "correct horse battery",
+            )
+            self.user_id = account_login.user_for_token(
+                connection, self.account_token
+            )
+        self.headers = {
+            "X-CodeTime-Account-Token": self.account_token,
+        }
 
     def tearDown(self):
         if self.old_home is None:
@@ -33,7 +53,9 @@ class TestLocalApiGuard(unittest.TestCase):
 
     def start_manual_session(self):
         with closing(codetime.connect()) as connection:
-            codetime.start_session(connection, "alpha")
+            codetime.start_session(
+                connection, "alpha", user_id=self.user_id
+            )
 
     def session_is_running(self):
         with closing(codetime.connect()) as connection:
@@ -51,21 +73,25 @@ class TestLocalApiGuard(unittest.TestCase):
     def test_cross_origin_stop_is_refused_and_changes_nothing(self):
         self.start_manual_session()
         response = self.client.post(
-            "/api/stop", headers={"Origin": "http://evil.example"}
+            "/api/stop",
+            headers={**self.headers, "Origin": "http://evil.example"},
         )
         self.assertEqual(response.status_code, 403)
         self.assertTrue(self.session_is_running())
 
     def test_same_origin_stop_works(self):
         self.start_manual_session()
-        response = self.client.post("/api/stop", headers={"Origin": LOCAL})
+        response = self.client.post(
+            "/api/stop",
+            headers={**self.headers, "Origin": LOCAL},
+        )
         self.assertEqual(response.status_code, 200)
         self.assertFalse(self.session_is_running())
 
     def test_request_without_origin_is_not_blocked_by_this_guard(self):
         # Command-line tools send no Origin. A token (the next step) covers them.
         self.start_manual_session()
-        response = self.client.post("/api/stop")
+        response = self.client.post("/api/stop", headers=self.headers)
         self.assertEqual(response.status_code, 200)
 
 
