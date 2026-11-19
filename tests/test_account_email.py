@@ -2,8 +2,9 @@ import contextlib
 import io
 import os
 import tempfile
+import threading
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import account_email
 import account_login
@@ -155,6 +156,90 @@ class TestLoginEmail(unittest.TestCase):
         result = account_email.send_pending(self.connection, picky, T0)
         self.assertEqual(result, (1, 1))
         self.assertEqual(delivered, ["bob@example.com"])
+
+
+    def test_stale_claim_is_recovered(self):
+        self.login("ada@example.com")
+
+        row_id = self.connection.execute(
+            "SELECT id FROM email_outbox ORDER BY id LIMIT 1"
+        ).fetchone()[0]
+
+        stale_time = (
+            T0 - timedelta(seconds=account_email.CLAIM_TIMEOUT_SECONDS + 1)
+        ).isoformat()
+
+        self.connection.execute(
+            """
+            UPDATE email_outbox
+            SET status = 'sending', claimed_at = ?
+            WHERE id = ?
+            """,
+            (stale_time, row_id),
+        )
+        self.connection.commit()
+
+        sender = Recorder()
+        result = account_email.send_pending(
+            self.connection, sender, current=T0
+        )
+
+        self.assertEqual(result, (1, 0))
+        self.assertEqual(len(sender.sent), 1)
+        self.assertEqual(self.outbox()[0][3], "sent")
+
+    def test_concurrent_workers_do_not_send_same_claimed_email(self):
+        self.login("ada@example.com")
+
+        first_started = threading.Event()
+        release_first = threading.Event()
+        first_messages = []
+        first_result = []
+        first_errors = []
+
+        def blocking_sender(to_email, subject, body):
+            first_messages.append((to_email, subject, body))
+            first_started.set()
+            if not release_first.wait(timeout=5):
+                raise TimeoutError("Test sender was not released")
+
+        def run_first_worker():
+            connection = codetime.connect()
+            try:
+                first_result.append(
+                    account_email.send_pending(
+                        connection, blocking_sender, current=T0
+                    )
+                )
+            except Exception as error:
+                first_errors.append(error)
+            finally:
+                connection.close()
+
+        worker = threading.Thread(target=run_first_worker)
+        worker.start()
+
+        try:
+            self.assertTrue(
+                first_started.wait(timeout=5),
+                "The first worker did not begin sending",
+            )
+
+            second_sender = Recorder()
+            second_result = account_email.send_pending(
+                self.connection, second_sender, current=T0
+            )
+
+            self.assertEqual(second_result, (0, 0))
+            self.assertEqual(second_sender.sent, [])
+        finally:
+            release_first.set()
+            worker.join(timeout=10)
+
+        self.assertFalse(worker.is_alive(), "The first worker did not finish")
+        self.assertEqual(first_errors, [])
+        self.assertEqual(first_result, [(1, 0)])
+        self.assertEqual(len(first_messages), 1)
 
     def test_print_sender_shows_the_email(self):
         buffer = io.StringIO()
