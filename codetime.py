@@ -544,6 +544,39 @@ def cmd_email_send(args):
     print(f"Email queue processed: {sent} sent, {failed} failed.")
 
 
+
+def cmd_email_status(args):
+    statuses = ("pending", "sending", "sent", "failed")
+    counts = dict.fromkeys(statuses, 0)
+    total = 0
+
+    with connect() as connection:
+        table = connection.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'email_outbox'"
+        ).fetchone()
+
+        if table:
+            rows = connection.execute(
+                "SELECT status, COUNT(*) FROM email_outbox GROUP BY status"
+            ).fetchall()
+            for status, count in rows:
+                if status in counts:
+                    counts[status] = count
+
+            total = connection.execute(
+                "SELECT COUNT(*) FROM email_outbox"
+            ).fetchone()[0]
+
+    print("Email Queue Status")
+    print("------------------")
+    print(f"Pending: {counts['pending']}")
+    print(f"Sending: {counts['sending']}")
+    print(f"Sent:    {counts['sent']}")
+    print(f"Failed:  {counts['failed']}")
+    print(f"Total:   {total}")
+
+
 def cmd_email_retry(args):
     import account_email
 
@@ -703,6 +736,7 @@ def build_parser():
     commands.add_parser("logout", help="log out of your account")
     commands.add_parser("email-send", help="send queued account emails")
     commands.add_parser("email-retry", help="retry failed account emails")
+    commands.add_parser("email-status", help="show email queue counts without sending")
 
     commands.add_parser("setup", help="set up email (one time)")
 
@@ -754,6 +788,7 @@ HANDLERS = {
 
      "email-send": cmd_email_send,
      "email-retry": cmd_email_retry,
+    "email-status": cmd_email_status,
 }
 
 def main(argv=None):

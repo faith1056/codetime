@@ -241,6 +241,79 @@ class TestLoginEmail(unittest.TestCase):
         self.assertEqual(first_result, [(1, 0)])
         self.assertEqual(len(first_messages), 1)
 
+    def test_email_status_shows_counts_without_changing_queue(self):
+        self.login("ada@example.com")
+        self.login("bob@example.com")
+
+        with codetime.connect() as connection:
+            rows = connection.execute(
+                "SELECT id, user_id, to_email, subject, body, created_at "
+                "FROM email_outbox ORDER BY id"
+            ).fetchall()
+            self.assertEqual(len(rows), 2)
+
+            # Keep Ada's message pending and mark Bob's as sending.
+            connection.execute(
+                "UPDATE email_outbox SET status = 'sending' WHERE id = ?",
+                (rows[1][0],),
+            )
+
+            # Add two test messages using the real outbox column names.
+            for row, status, dedupe_key in (
+                (rows[0], "sent", "test-email-status:sent"),
+                (rows[1], "failed", "test-email-status:failed"),
+            ):
+                connection.execute(
+                    """
+                    INSERT INTO email_outbox
+                    (user_id, to_email, subject, body, dedupe_key,
+                     status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        row[1], row[2], row[3], row[4],
+                        dedupe_key, status, row[5],
+                    ),
+                )
+
+            before = connection.execute(
+                "SELECT id, status, attempts, claimed_at "
+                "FROM email_outbox ORDER BY id"
+            ).fetchall()
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            codetime.cmd_email_status(None)
+
+        for expected in (
+            "Pending: 1", "Sending: 1", "Sent:    1",
+            "Failed:  1", "Total:   4",
+        ):
+            self.assertIn(expected, output.getvalue())
+
+        with codetime.connect() as connection:
+            after = connection.execute(
+                "SELECT id, status, attempts, claimed_at "
+                "FROM email_outbox ORDER BY id"
+            ).fetchall()
+
+        self.assertEqual(before, after)
+
+    def test_email_status_handles_empty_queue(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            codetime.cmd_email_status(None)
+
+        for expected in (
+            "Pending: 0", "Sending: 0", "Sent:    0",
+            "Failed:  0", "Total:   0",
+        ):
+            self.assertIn(expected, output.getvalue())
+
+    def test_email_status_is_registered_in_cli(self):
+        args = codetime.build_parser().parse_args(["email-status"])
+        self.assertEqual(args.command, "email-status")
+
     def test_print_sender_shows_the_email(self):
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
