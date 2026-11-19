@@ -134,26 +134,26 @@ class TestLoginEmail(unittest.TestCase):
         self.assertEqual(recorder.sent, [])
 
 
-def test_retry_failed_makes_given_up_emails_sendable_again(self):
-    self.login("ada@example.com")
+    def test_retry_failed_makes_given_up_emails_sendable_again(self):
+        self.login("ada@example.com")
 
-    for _ in range(account_email.MAX_ATTEMPTS):
-        account_email.send_pending(self.connection, broken_sender, T0)
+        for _ in range(account_email.MAX_ATTEMPTS):
+            account_email.send_pending(self.connection, broken_sender, T0)
 
-    self.assertEqual(
-        account_email.retry_failed(self.connection), 1
-    )
+        self.assertEqual(
+            account_email.retry_failed(self.connection), 1
+        )
 
-    # Retrying must preserve the previous attempt count.
-    self.assertEqual(
-        self.outbox()[0][4], account_email.MAX_ATTEMPTS
-    )
+        # Retrying must preserve the previous attempt count.
+        self.assertEqual(
+            self.outbox()[0][4], account_email.MAX_ATTEMPTS
+        )
 
-    recorder = Recorder()
-    result = account_email.send_pending(self.connection, recorder, T0)
+        recorder = Recorder()
+        result = account_email.send_pending(self.connection, recorder, T0)
 
-    self.assertEqual(result, (1, 0))
-    self.assertEqual(self.outbox()[0][3], "sent")
+        self.assertEqual(result, (1, 0))
+        self.assertEqual(self.outbox()[0][3], "sent")
 
     def test_one_failure_does_not_block_the_others(self):
         self.login("ada@example.com")
