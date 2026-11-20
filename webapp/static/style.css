@@ -173,3 +173,86 @@ footer {
         padding: 10px 12px;
     }
 }
+/* ---------- Hidden elements ---------- */
+
+[hidden] {
+    display: none !important;
+}
+
+/* ---------- Login form ---------- */
+
+#login-section {
+    grid-column: 1 / -1;
+    max-width: 420px;
+    width: 100%;
+    margin: 0 auto;
+}
+
+#login-form label {
+    display: block;
+    margin-top: 14px;
+    font-size: 0.9rem;
+    color: #cbd5e1;
+}
+
+#login-form input[type="email"],
+#login-form input[type="text"],
+#login-form input[type="password"] {
+    width: 100%;
+    margin-top: 6px;
+    padding: 12px;
+    font-size: 1rem;
+    color: #f8fafc;
+    background-color: #0f172a;
+    border: 1px solid #475569;
+    border-radius: 8px;
+}
+
+#login-form .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    cursor: pointer;
+}
+
+#login-form .checkbox-row input {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+}
+
+#login-error {
+    min-height: 1.4em;
+    margin: 12px 0 0;
+    color: #fca5a5;
+}
+
+.hint {
+    font-size: 0.85rem;
+}
+
+code {
+    padding: 1px 6px;
+    background-color: #0f172a;
+    border-radius: 4px;
+}
+
+button.primary {
+    width: 100%;
+    margin: 18px 0 0;
+    background-color: #38bdf8;
+    color: #082f49;
+}
+
+button.secondary {
+    margin-top: 14px;
+    background-color: #334155;
+    color: #e2e8f0;
+}
+
+button:focus-visible,
+input:focus-visible {
+    outline: 3px solid #fbbf24;
+    outline-offset: 2px;
+}
