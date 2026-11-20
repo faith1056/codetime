@@ -21,3 +21,10 @@ config.env
 .vscode/
 .idea/
 node_modules/
+
+# Local backups
+*.account-backup
+*.cli-account-backup
+*.pre-fix-backup
+*.before-redesign
+*.bak
