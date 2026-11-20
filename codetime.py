@@ -134,7 +134,8 @@ def require_cli_user_id(connection):
 
 def connect():
     directory = app_dir()
-    directory.mkdir(parents=True, exist_ok=True)
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(directory, 0o700)  # owner only, even if it already existed
 
     connection = sqlite3.connect(directory / "sessions.db")
     connection.execute(

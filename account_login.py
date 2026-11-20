@@ -81,6 +81,13 @@ def login(connection, email, password, current=None):
     ):
         raise CodeTimeError(GENERIC_ERROR)
 
+    # Forget failures older than the window so the table cannot grow forever.
+    connection.execute(
+        "DELETE FROM failed_logins WHERE failed_at < ?",
+        ((current - FAILURE_WINDOW).isoformat(),),
+    )
+    connection.commit()
+
     if _recent_failures(connection, email, current) >= MAX_FAILURES:
         raise CodeTimeError(LOCKED_ERROR)
 

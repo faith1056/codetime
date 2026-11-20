@@ -19,6 +19,7 @@ def create_token():
 
     # Create the file with owner-only permissions from the start.
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)  # also tightens a file that already existed
     with os.fdopen(fd, "w") as handle:
         handle.write(token)
     return token
