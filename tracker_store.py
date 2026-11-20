@@ -117,6 +117,21 @@ def read_last_seen():
         return None
 
 
+def _unowned_active_session(connection):
+    """Newest running row that belongs to no account (tracker/legacy rows).
+
+    Recovery must never touch a row owned by an account.
+    """
+    row = connection.execute(
+        "SELECT id, project, started_at FROM sessions "
+        "WHERE ended_at IS NULL AND user_id IS NULL "
+        "ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if row is None:
+        return None
+    return row[0], row[1], datetime.fromisoformat(row[2])
+
+
 def recover(connection, current, idle_limit):
     """Close a row left open by a crash. Return None, 'closed' or 'deleted'.
 
@@ -125,7 +140,7 @@ def recover(connection, current, idle_limit):
     else (such as a manual session) is left alone. The row is closed at
     the last-seen time, never at the current time.
     """
-    running = codetime.active_session(connection)
+    running = _unowned_active_session(connection)
     last_seen = read_last_seen()
 
     if running is None or last_seen is None:
@@ -137,12 +152,17 @@ def recover(connection, current, idle_limit):
         return None
 
     if started == last_seen:
-        connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        connection.execute(
+            "DELETE FROM sessions "
+            "WHERE id = ? AND ended_at IS NULL AND user_id IS NULL",
+            (session_id,),
+        )
         connection.commit()
         return "deleted"
 
     connection.execute(
-        "UPDATE sessions SET ended_at = ? WHERE id = ?",
+        "UPDATE sessions SET ended_at = ? "
+        "WHERE id = ? AND ended_at IS NULL AND user_id IS NULL",
         (last_seen.isoformat(), session_id),
     )
     connection.commit()
