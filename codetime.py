@@ -168,7 +168,8 @@ def active_session(connection, user_id=None):
     if user_id is None:
         row = connection.execute(
             "SELECT id, project, started_at FROM sessions "
-            "WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1"
+            "WHERE ended_at IS NULL AND user_id IS NULL "
+            "ORDER BY id DESC LIMIT 1"
         ).fetchone()
     else:
         row = connection.execute(
@@ -260,7 +261,7 @@ def list_sessions(connection, limit, user_id=None):
     if user_id is None:
         rows = connection.execute(
             "SELECT id, project, started_at, ended_at FROM sessions "
-            "ORDER BY id DESC LIMIT ?",
+            "WHERE user_id IS NULL ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
     else:
@@ -284,7 +285,8 @@ def list_sessions(connection, limit, user_id=None):
 def get_session(connection, session_id, user_id=None):
     if user_id is None:
         row = connection.execute(
-            "SELECT id, project, started_at, ended_at FROM sessions WHERE id = ?",
+            "SELECT id, project, started_at, ended_at FROM sessions "
+            "WHERE id = ? AND user_id IS NULL",
             (session_id,),
         ).fetchone()
     else:
@@ -311,7 +313,10 @@ def delete_session(connection, session_id, user_id=None):
     get_session(connection, session_id, user_id=user_id)
 
     if user_id is None:
-        connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        connection.execute(
+            "DELETE FROM sessions WHERE id = ? AND user_id IS NULL",
+            (session_id,),
+        )
     else:
         connection.execute(
             "DELETE FROM sessions WHERE id = ? AND user_id = ?",
@@ -328,7 +333,8 @@ def collect_segments(connection, start, end, current, user_id=None):
     """
     if user_id is None:
         rows = connection.execute(
-            "SELECT id, project, started_at, ended_at FROM sessions"
+            "SELECT id, project, started_at, ended_at FROM sessions "
+            "WHERE user_id IS NULL"
         ).fetchall()
     else:
         rows = connection.execute(

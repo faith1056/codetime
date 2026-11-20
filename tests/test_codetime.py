@@ -417,7 +417,14 @@ class TestLogAndDelete(CodeTimeTestCase):
             _, out, _ = self.run_cli("delete", "1")
 
         self.assertIn("Nothing deleted", out)
-        self.assertEqual(len(codetime.list_sessions(self.connection, 10)), 1)
+
+        import account_login
+        token = codetime.token_path().read_text(encoding="utf-8").strip()
+        user_id = account_login.user_for_token(self.connection, token)
+        self.assertEqual(
+            len(codetime.list_sessions(self.connection, 10, user_id=user_id)),
+            1,
+        )
 
     def test_delete_asks_and_accepts_yes(self):
         codetime.start_session(self.connection, "remove")

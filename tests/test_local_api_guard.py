@@ -59,7 +59,9 @@ class TestLocalApiGuard(unittest.TestCase):
 
     def session_is_running(self):
         with closing(codetime.connect()) as connection:
-            return codetime.active_session(connection) is not None
+            return codetime.active_session(
+                connection, user_id=self.user_id
+            ) is not None
 
     def test_unknown_host_is_rejected(self):
         attacker = TestClient(create_app(), base_url="http://evil.example")
