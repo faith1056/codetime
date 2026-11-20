@@ -23,6 +23,22 @@ ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+_SCHEMA_READY = set()
+
+
+def _ensure_schema_once(connection):
+    """Create the account tables once per data folder, not on every request."""
+    key = str(codetime.app_dir())
+    if key not in _SCHEMA_READY:
+        account_login.ensure_schema(connection)
+        _SCHEMA_READY.add(key)
+
+
 def create_app() -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -97,7 +113,7 @@ def create_app() -> FastAPI:
     ) -> int:
         """Require a valid CodeTime account login token."""
         with closing(codetime.connect()) as connection:
-            account_login.ensure_schema(connection)
+            _ensure_schema_once(connection)
             user_id = account_login.user_for_token(
                 connection,
                 x_codetime_account_token,
@@ -110,6 +126,33 @@ def create_app() -> FastAPI:
             )
 
         return user_id
+
+    @app.post("/api/login", tags=["accounts"])
+    def login(data: LoginRequest) -> dict:
+        """Check the password and return a login token."""
+        with closing(codetime.connect()) as connection:
+            _ensure_schema_once(connection)
+            try:
+                token = account_login.login(
+                    connection, data.email, data.password
+                )
+            except codetime.CodeTimeError as error:
+                locked = str(error) == account_login.LOCKED_ERROR
+                raise HTTPException(
+                    status_code=429 if locked else 401,
+                    detail=str(error),
+                ) from None
+        return {"token": token}
+
+    @app.post("/api/logout", tags=["accounts"])
+    def logout(
+        x_codetime_account_token: str | None = Header(default=None),
+    ) -> dict:
+        """Revoke the login token. Safe to call with a bad or missing token."""
+        with closing(codetime.connect()) as connection:
+            _ensure_schema_once(connection)
+            account_login.logout(connection, x_codetime_account_token)
+        return {"status": "logged out"}
 
     @app.get("/api/status", tags=["sessions"])
     def session_status(
