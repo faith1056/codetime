@@ -354,12 +354,24 @@ def create_app() -> FastAPI:
         tags=["tracker"],
         dependencies=[Depends(require_token)],
     )
-    def tracker_status() -> dict:
-        """Return the tracker's current state and project."""
+    def tracker_status(
+        user_id: int = Depends(require_tracker_account),
+    ) -> dict:
+        """Return tracker state only to its owning account."""
         with engine_lock:
+            ensure_tracker_owner(user_id)
+            project = engine.tracker.project
+
+            # Never disclose a previous account's project after it stops.
+            if (
+                engine._owner_id is not tracker_engine._UNSET
+                and engine._owner_id != user_id
+            ):
+                project = None
+
             return {
                 "state": engine.tracker.state.value,
-                "project": engine.tracker.project,
+                "project": project,
             }
 
     @app.post(
