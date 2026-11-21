@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0b1020">
     <title>CodeTime — Coding Time Tracker</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -17,43 +18,121 @@
     </header>
 
     <main>
+        <!-- Login -->
         <section id="login-section">
-            <h2>Log in</h2>
+            <h2>Welcome back</h2>
+            <p>Log in to continue tracking your coding progress.</p>
+
             <form id="login-form">
                 <label for="login-email">Email</label>
-                <input id="login-email" type="email" autocomplete="username" required>
+                <input
+                    id="login-email"
+                    type="email"
+                    autocomplete="username"
+                    required
+                >
 
                 <label for="login-password">Password</label>
-                <input id="login-password" type="password" autocomplete="current-password" required>
+                <input
+                    id="login-password"
+                    type="password"
+                    autocomplete="current-password"
+                    required
+                >
 
                 <label class="checkbox-row" for="show-password">
                     <input id="show-password" type="checkbox">
                     Show password
                 </label>
 
-                <button id="login-button" type="submit" class="primary">Log in</button>
+                <button id="login-button" type="submit" class="primary">
+                    Log in
+                </button>
+
                 <p id="login-error" role="alert"></p>
             </form>
-            <p class="hint">No account yet? Run <code>codetime register</code> in a terminal.</p>
-        </section>
 
-        <section class="dash" hidden>
-            <h2>Current Session</h2>
-            <p id="session-status">No active session</p>
-            <button id="start-button" type="button">Start Session</button>
-            <button id="stop-button" type="button" disabled>Stop Session</button>
-        </section>
-
-        <section class="dash" hidden>
-            <h2>Today's Progress</h2>
-            <p>
-                Total time:
-                <strong id="today-total">0 minutes</strong>
+            <p class="hint">
+                No account yet? Run <code>codetime register</code> in a terminal.
             </p>
         </section>
 
+        <!-- Current session -->
         <section class="dash" hidden>
+            <p class="eyebrow">YOUR WORKSPACE</p>
+            <h2>Current Session</h2>
+            <p class="muted">Choose a project and focus on your work.</p>
+
+            <label for="project-name">Project name</label>
+            <input
+                id="project-name"
+                type="text"
+                placeholder="e.g. CodeTime dashboard"
+                maxlength="200"
+                autocomplete="off"
+            >
+
+            <div class="timer-display">
+                <p id="session-status" aria-live="polite">No active session</p>
+                <p id="live-timer" aria-live="off">00:00:00</p>
+            </div>
+
+            <div class="session-controls">
+                <button id="start-button" type="button" class="primary">
+                    Start Session
+                </button>
+
+                <button id="stop-button" type="button" disabled>
+                    Stop Session
+                </button>
+            </div>
+        </section>
+
+        <!-- Focus Planner -->
+        <section class="dash" id="focus-planner" hidden>
+            <p class="eyebrow">YOUR FOCUS TIME</p>
+            <h2>Focus Planner</h2>
+            <p class="muted">Plan focused work independently of your coding session.</p>
+
+            <label for="focus-duration">Focus duration</label>
+            <select id="focus-duration">
+                <option value="25">25 minutes</option>
+                <option value="45">45 minutes</option>
+                <option value="60">1 hour</option>
+                <option value="custom">Custom duration</option>
+            </select>
+
+            <div id="focus-custom-duration" hidden>
+                <label for="focus-custom-minutes">Custom duration (minutes)</label>
+                <input id="focus-custom-minutes" type="number"
+                       min="1" max="480" value="30">
+            </div>
+
+            <div class="timer-display">
+                <p id="focus-status" aria-live="polite">Ready to focus</p>
+                <p id="focus-countdown" aria-live="off">25:00</p>
+            </div>
+
+            <div class="session-controls">
+                <button id="focus-start" type="button" class="primary">Start Focus</button>
+                <button id="focus-pause" type="button" disabled>Pause</button>
+                <button id="focus-cancel" type="button" disabled>Cancel</button>
+            </div>
+        </section>
+
+        <!-- Today's progress -->
+        <section class="dash" hidden>
+            <p class="eyebrow">YOUR DAILY SUMMARY</p>
+            <h2>Today's Progress</h2>
+            <p class="muted">Your total tracked time today.</p>
+            <strong id="today-total">0 seconds</strong>
+        </section>
+
+        <!-- Recent sessions -->
+        <section class="dash" hidden>
+            <p class="eyebrow">YOUR ACTIVITY</p>
             <h2>Recent Sessions</h2>
+
             <div id="recent-sessions">
                 <p>Loading recent sessions...</p>
             </div>
@@ -77,15 +156,19 @@
         const loginButton = document.getElementById("login-button");
         const loginError = document.getElementById("login-error");
         const logoutButton = document.getElementById("logout-button");
+        const projectName = document.getElementById("project-name");
         const startButton = document.getElementById("start-button");
         const stopButton = document.getElementById("stop-button");
         const sessionStatus = document.getElementById("session-status");
+        const liveTimer = document.getElementById("live-timer");
         const todayTotal = document.getElementById("today-total");
         const recentSessions = document.getElementById("recent-sessions");
 
         let memoryToken = null;
         let actionInFlight = false;
         let refreshing = false;
+        let activeSessionStartedAt = null;
+        let activeSessionElapsedSeconds = 0;
 
         class AuthError extends Error {}
 
@@ -99,12 +182,22 @@
 
         function setToken(token) {
             memoryToken = token;
-            try { sessionStorage.setItem(TOKEN_KEY, token); } catch (error) {}
+
+            try {
+                sessionStorage.setItem(TOKEN_KEY, token);
+            } catch (error) {
+                // The in-memory token remains available for this page.
+            }
         }
 
         function clearToken() {
             memoryToken = null;
-            try { sessionStorage.removeItem(TOKEN_KEY); } catch (error) {}
+
+            try {
+                sessionStorage.removeItem(TOKEN_KEY);
+            } catch (error) {
+                // Session storage may be unavailable.
+            }
         }
 
         function resetPasswordField() {
@@ -114,45 +207,70 @@
         }
 
         function showLogin(message) {
-            for (const section of dashSections) { section.hidden = true; }
+            for (const section of dashSections) {
+                section.hidden = true;
+            }
+
             loginSection.hidden = false;
             logoutButton.hidden = true;
             recentSessions.replaceChildren();
             sessionStatus.textContent = "No active session";
-            todayTotal.textContent = "0 minutes";
+            liveTimer.textContent = "00:00:00";
+            todayTotal.textContent = "0 seconds";
+            activeSessionStartedAt = null;
+            activeSessionElapsedSeconds = 0;
+
             resetPasswordField();
             loginError.textContent = message || "";
         }
 
         function showDashboard() {
             loginSection.hidden = true;
-            for (const section of dashSections) { section.hidden = false; }
+
+            for (const section of dashSections) {
+                section.hidden = false;
+            }
+
             logoutButton.hidden = false;
             loginError.textContent = "";
+
             refreshDashboard();
             refreshRecentSessions();
         }
 
         async function api(path, options = {}) {
             const token = getToken();
+
             if (!token) {
                 showLogin("");
                 throw new AuthError("Not logged in.");
             }
 
-            const headers = { ...(options.headers || {}), [TOKEN_HEADER]: token };
-            const response = await fetch(path, { ...options, headers });
+            const headers = {
+                ...(options.headers || {}),
+                [TOKEN_HEADER]: token
+            };
+
+            const response = await fetch(path, {
+                ...options,
+                headers
+            });
 
             if (response.status === 401) {
                 clearToken();
                 showLogin("Your session expired. Please log in again.");
                 throw new AuthError("Session expired.");
             }
+
             return response;
         }
 
         async function readJson(response) {
-            try { return await response.json(); } catch (error) { return {}; }
+            try {
+                return await response.json();
+            } catch (error) {
+                return {};
+            }
         }
 
         function describeError(error, fallback) {
@@ -162,21 +280,53 @@
         }
 
         function formatDuration(seconds) {
-            const hours = Math.floor(seconds / 3600);
-            const minutes = Math.floor((seconds % 3600) / 60);
-            const remainingSeconds = seconds % 60;
+            const safeSeconds = Math.max(0, Math.floor(seconds || 0));
+            const hours = Math.floor(safeSeconds / 3600);
+            const minutes = Math.floor((safeSeconds % 3600) / 60);
+            const remainingSeconds = safeSeconds % 60;
 
             if (hours > 0) {
                 return `${hours}h ${minutes}m`;
             }
+
             if (minutes > 0) {
                 return `${minutes} minute${minutes === 1 ? "" : "s"}`;
             }
+
             return `${remainingSeconds} second${remainingSeconds === 1 ? "" : "s"}`;
         }
 
+        function formatClock(seconds) {
+            const total = Math.max(0, Math.floor(seconds || 0));
+            const hours = Math.floor(total / 3600);
+            const minutes = Math.floor((total % 3600) / 60);
+            const remainingSeconds = total % 60;
+
+            return [hours, minutes, remainingSeconds]
+                .map(value => String(value).padStart(2, "0"))
+                .join(":");
+        }
+
+        function updateLiveTimer() {
+            if (activeSessionStartedAt === null) {
+                liveTimer.textContent = "00:00:00";
+                return;
+            }
+
+            const elapsed = activeSessionElapsedSeconds
+                + Math.max(
+                    0,
+                    Math.floor((Date.now() - activeSessionStartedAt) / 1000)
+                );
+
+            liveTimer.textContent = formatClock(elapsed);
+        }
+
         async function refreshDashboard() {
-            if (!getToken() || refreshing) { return; }
+            if (!getToken() || refreshing) {
+                return;
+            }
+
             refreshing = true;
 
             try {
@@ -190,11 +340,24 @@
                 const session = data.active_session;
 
                 if (session) {
-                    sessionStatus.textContent =
-                        `Running: ${session.project} (${formatDuration(session.elapsed_seconds)})`;
+                    sessionStatus.textContent = `Tracking: ${session.project}`;
+
+                    activeSessionElapsedSeconds =
+                        Number(session.elapsed_seconds) || 0;
+
+                    // Use the server's elapsed time as the timer baseline.
+                    activeSessionStartedAt = Date.now();
+
+                    projectName.value = session.project;
+                    projectName.disabled = true;
                 } else {
                     sessionStatus.textContent = "No active session";
+                    activeSessionStartedAt = null;
+                    activeSessionElapsedSeconds = 0;
+                    projectName.disabled = false;
                 }
+
+                updateLiveTimer();
 
                 if (!actionInFlight) {
                     startButton.disabled = Boolean(session);
@@ -203,8 +366,15 @@
 
                 todayTotal.textContent = formatDuration(data.today_seconds);
             } catch (error) {
-                if (error instanceof AuthError) { return; }
-                sessionStatus.textContent = describeError(error, "Could not load session status.");
+                if (error instanceof AuthError) {
+                    return;
+                }
+
+                sessionStatus.textContent = describeError(
+                    error,
+                    "Could not load session status."
+                );
+
                 console.error("Dashboard error:", error);
             } finally {
                 refreshing = false;
@@ -212,7 +382,9 @@
         }
 
         async function refreshRecentSessions() {
-            if (!getToken()) { return; }
+            if (!getToken()) {
+                return;
+            }
 
             try {
                 const response = await api("/api/sessions");
@@ -224,7 +396,7 @@
 
                 recentSessions.replaceChildren();
 
-                if (data.sessions.length === 0) {
+                if (!Array.isArray(data.sessions) || data.sessions.length === 0) {
                     const message = document.createElement("p");
                     message.textContent = "No sessions recorded yet.";
                     recentSessions.appendChild(message);
@@ -235,8 +407,8 @@
                     const card = document.createElement("article");
                     card.className = "session-entry";
 
-                    const projectName = document.createElement("h3");
-                    projectName.textContent = session.project;
+                    const name = document.createElement("h3");
+                    name.textContent = session.project;
 
                     const startTime = document.createElement("p");
                     startTime.textContent =
@@ -247,20 +419,31 @@
                         ? "Status: In progress"
                         : `Duration: ${formatDuration(session.duration_seconds)}`;
 
-                    card.appendChild(projectName);
+                    card.appendChild(name);
                     card.appendChild(startTime);
                     card.appendChild(duration);
+
                     recentSessions.appendChild(card);
                 }
             } catch (error) {
-                if (error instanceof AuthError) { return; }
-                recentSessions.textContent = describeError(error, "Unable to load recent sessions.");
+                if (error instanceof AuthError) {
+                    return;
+                }
+
+                recentSessions.textContent = describeError(
+                    error,
+                    "Unable to load recent sessions."
+                );
+
                 console.error("Recent sessions error:", error);
             }
         }
 
         async function runAction(path, options, failureMessage) {
-            if (actionInFlight) { return; }
+            if (actionInFlight) {
+                return;
+            }
+
             actionInFlight = true;
             startButton.disabled = true;
             stopButton.disabled = true;
@@ -278,6 +461,7 @@
                 }
             } finally {
                 actionInFlight = false;
+
                 if (getToken()) {
                     await refreshDashboard();
                     await refreshRecentSessions();
@@ -286,19 +470,33 @@
         }
 
         startButton.addEventListener("click", () => {
+            const project = projectName.value.trim();
+
+            if (!project) {
+                projectName.focus();
+                sessionStatus.textContent = "Enter a project name to begin.";
+                return;
+            }
+
             runAction(
                 "/api/start",
                 {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ project: "CodeTime dashboard" })
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ project })
                 },
                 "Could not start session."
             );
         });
 
         stopButton.addEventListener("click", () => {
-            runAction("/api/stop", { method: "POST" }, "Could not stop session.");
+            runAction(
+                "/api/stop",
+                { method: "POST" },
+                "Could not stop session."
+            );
         });
 
         showPassword.addEventListener("change", () => {
@@ -307,23 +505,29 @@
 
         loginForm.addEventListener("submit", async (event) => {
             event.preventDefault();
+
             loginButton.disabled = true;
             loginError.textContent = "";
 
             try {
                 const response = await fetch("/api/login", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
                     body: JSON.stringify({
                         email: loginEmail.value,
                         password: loginPassword.value
                     })
                 });
+
                 const data = await readJson(response);
 
                 if (!response.ok || !data.token) {
                     loginError.textContent =
-                        typeof data.detail === "string" ? data.detail : "Could not log in.";
+                        typeof data.detail === "string"
+                            ? data.detail
+                            : "Could not log in.";
                     return;
                 }
 
@@ -331,7 +535,10 @@
                 resetPasswordField();
                 showDashboard();
             } catch (error) {
-                loginError.textContent = describeError(error, "Could not log in.");
+                loginError.textContent = describeError(
+                    error,
+                    "Could not log in."
+                );
             } finally {
                 loginButton.disabled = false;
             }
@@ -345,7 +552,9 @@
                 if (token) {
                     await fetch("/api/logout", {
                         method: "POST",
-                        headers: { [TOKEN_HEADER]: token }
+                        headers: {
+                            [TOKEN_HEADER]: token
+                        }
                     });
                 }
             } catch (error) {
@@ -357,9 +566,294 @@
             }
         });
 
-        if (getToken()) { showDashboard(); } else { showLogin(""); }
+        if (getToken()) {
+            showDashboard();
+        } else {
+            showLogin("");
+        }
 
+        // Keep the timer smooth and refresh server-backed data regularly.
+        setInterval(updateLiveTimer, 250);
         setInterval(refreshDashboard, 1000);
     </script>
+
+<script>
+(() => {
+    const KEY = "codetime_focus_timer_v1";
+    const durationSelect = document.getElementById("focus-duration");
+    const customBox = document.getElementById("focus-custom-duration");
+    const customInput = document.getElementById("focus-custom-minutes");
+    const countdown = document.getElementById("focus-countdown");
+    const status = document.getElementById("focus-status");
+    const start = document.getElementById("focus-start");
+    const pause = document.getElementById("focus-pause");
+    const cancel = document.getElementById("focus-cancel");
+    const logout = document.getElementById("logout-button");
+
+    // Stop safely if the Focus Planner interface is missing.
+    if (!durationSelect || !customBox || !customInput ||
+        !countdown || !status || !start || !pause || !cancel) {
+        throw new Error("Focus Planner HTML elements are missing.");
+    }
+
+    let state = null;
+    let audioContext = null;
+    let alarmInterval = null;
+    let lastAlarmId = null;
+
+    function readState() {
+        try {
+            return JSON.parse(sessionStorage.getItem(KEY) || "null");
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function saveState() {
+        try {
+            if (state) {
+                sessionStorage.setItem(KEY, JSON.stringify(state));
+            } else {
+                sessionStorage.removeItem(KEY);
+            }
+        } catch (_) {
+            // The timer can still run if browser storage is unavailable.
+        }
+    }
+
+    function remainingMs() {
+        if (!state) return 0;
+        if (state.mode === "running") {
+            return Math.max(0, state.endAt - Date.now());
+        }
+        return Math.max(0, state.remainingMs || 0);
+    }
+
+    function formatTime(ms) {
+        const seconds = Math.ceil(Math.max(0, ms) / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const remainder = seconds % 60;
+        return String(minutes).padStart(2, "0") + ":" +
+            String(remainder).padStart(2, "0");
+    }
+
+    function selectedMinutes() {
+        if (durationSelect.value !== "custom") {
+            return Number(durationSelect.value);
+        }
+
+        const value = Number(customInput.value);
+        return Number.isInteger(value) && value >= 1 && value <= 480
+            ? value : null;
+    }
+
+    function formatSelectedDuration() {
+        const minutes = selectedMinutes();
+        return minutes === null
+            ? "--:--"
+            : String(minutes).padStart(2, "0") + ":00";
+    }
+
+    function render() {
+        const running = state && state.mode === "running";
+        const paused = state && state.mode === "paused";
+        const finished = state && state.mode === "finished";
+
+        countdown.textContent = state
+            ? formatTime(remainingMs())
+            : formatSelectedDuration();
+
+        // A finished timer can be started again.
+        start.disabled = Boolean(running);
+        pause.disabled = !running && !paused;
+        cancel.disabled = !state;
+        pause.textContent = paused ? "Resume" : "Pause";
+
+        if (!state) {
+            status.textContent = "Ready to focus";
+        } else if (running) {
+            status.textContent = "Focus session in progress";
+        } else if (paused) {
+            status.textContent = "Focus timer paused";
+        } else if (finished) {
+            status.textContent = "Focus time is up! Take a break or start again.";
+        }
+    }
+
+    function stopAlarm() {
+        if (alarmInterval !== null) {
+            clearInterval(alarmInterval);
+            alarmInterval = null;
+        }
+    }
+
+    async function playAlarm() {
+        stopAlarm();
+
+        try {
+            const AudioContextClass =
+                window.AudioContext || window.webkitAudioContext;
+
+            if (!AudioContextClass) {
+                status.textContent = "Focus time is up! Audio is unavailable.";
+                return;
+            }
+
+            audioContext = audioContext || new AudioContextClass();
+            await audioContext.resume();
+
+            let beeps = 0;
+
+            function beep() {
+                if (!audioContext || audioContext.state !== "running") return;
+
+                const oscillator = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+
+                oscillator.type = "sine";
+                oscillator.frequency.value = 880;
+                gain.gain.value = 0.15;
+
+                oscillator.connect(gain);
+                gain.connect(audioContext.destination);
+                oscillator.start();
+                oscillator.stop(audioContext.currentTime + 0.22);
+            }
+
+            beep();
+
+            alarmInterval = setInterval(() => {
+                beeps += 1;
+
+                if (beeps >= 9) {
+                    stopAlarm();
+                    return;
+                }
+
+                beep();
+            }, 700);
+        } catch (error) {
+            console.warn("Could not play focus alarm:", error);
+        }
+    }
+
+    function finishTimer() {
+        if (!state || state.mode !== "running") return;
+
+        state.mode = "finished";
+        state.remainingMs = 0;
+        state.endAt = null;
+        saveState();
+        render();
+
+        if (lastAlarmId !== state.id) {
+            lastAlarmId = state.id;
+            playAlarm();
+        }
+    }
+
+    function tick() {
+        if (state && state.mode === "running" && remainingMs() <= 0) {
+            finishTimer();
+        } else {
+            render();
+        }
+    }
+
+    durationSelect.addEventListener("change", () => {
+        customBox.hidden = durationSelect.value !== "custom";
+        if (!state) render();
+    });
+
+    customInput.addEventListener("input", () => {
+        if (!state) render();
+    });
+
+    start.addEventListener("click", async () => {
+        if (state && state.mode === "paused") {
+            state.mode = "running";
+            state.endAt = Date.now() + state.remainingMs;
+            saveState();
+            render();
+            return;
+        }
+
+        const minutes = selectedMinutes();
+
+        if (minutes === null) {
+            status.textContent = "Enter a duration from 1 to 480 minutes.";
+            customInput.focus();
+            return;
+        }
+
+        stopAlarm();
+        lastAlarmId = null;
+
+        state = {
+            id: String(Date.now()) + "-" + Math.random().toString(36).slice(2),
+            mode: "running",
+            remainingMs: minutes * 60000,
+            endAt: Date.now() + minutes * 60000
+        };
+
+        try {
+            const AudioContextClass =
+                window.AudioContext || window.webkitAudioContext;
+
+            if (AudioContextClass) {
+                audioContext = audioContext || new AudioContextClass();
+                await audioContext.resume();
+            }
+        } catch (_) {
+            // The countdown can run without audio.
+        }
+
+        saveState();
+        render();
+    });
+
+    pause.addEventListener("click", () => {
+        if (!state) return;
+
+        if (state.mode === "running") {
+            state.remainingMs = remainingMs();
+            state.endAt = null;
+            state.mode = "paused";
+        } else if (state.mode === "paused") {
+            state.endAt = Date.now() + state.remainingMs;
+            state.mode = "running";
+        }
+
+        saveState();
+        render();
+    });
+
+    cancel.addEventListener("click", () => {
+        stopAlarm();
+        state = null;
+        saveState();
+        render();
+    });
+
+    if (logout) {
+        logout.addEventListener("click", () => {
+            stopAlarm();
+            state = null;
+            saveState();
+        });
+    }
+
+    state = readState();
+
+    if (state && state.mode === "running" && remainingMs() <= 0) {
+        finishTimer();
+    } else {
+        render();
+    }
+
+    setInterval(tick, 250);
+})();
+</script>
+
 </body>
 </html>
