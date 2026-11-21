@@ -2,6 +2,8 @@ import os
 import tempfile
 import unittest
 
+import account_login
+import accounts
 import codetime
 import tracker_auth
 
@@ -21,7 +23,23 @@ class TestControlRoutes(unittest.TestCase):
         self.old_home = os.environ.get("CODETIME_HOME")
         os.environ["CODETIME_HOME"] = self.folder.name
         self.client = TestClient(create_app(), base_url="http://127.0.0.1:47625")
-        self.headers = {"X-CodeTime-Token": tracker_auth.create_token()}
+        self.token = tracker_auth.create_token()
+        with codetime.connect() as connection:
+            account_login.ensure_schema(connection)
+            accounts.register(
+                connection,
+                "control-test@example.com",
+                "correct horse battery",
+            )
+            self.account_token = account_login.login(
+                connection,
+                "control-test@example.com",
+                "correct horse battery",
+            )
+        self.headers = {
+            "X-CodeTime-Token": self.token,
+            "X-CodeTime-Account-Token": self.account_token,
+        }
 
     def tearDown(self):
         if self.old_home is None:
@@ -80,6 +98,43 @@ class TestControlRoutes(unittest.TestCase):
         response = self.client.post("/tracker/stop", headers=self.headers)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.rows(), [])
+
+
+    def test_another_account_cannot_pause_resume_or_stop_active_session(self):
+        # Account A opens a session.
+        self.assertEqual(self.event().status_code, 200)
+
+        # Create a separate login for Account B, using the same tracker token.
+        with codetime.connect() as connection:
+            accounts.register(
+                connection,
+                "other-control-test@example.com",
+                "another correct horse battery",
+            )
+            other_account_token = account_login.login(
+                connection,
+                "other-control-test@example.com",
+                "another correct horse battery",
+            )
+
+        other_headers = {
+            "X-CodeTime-Token": self.token,
+            "X-CodeTime-Account-Token": other_account_token,
+        }
+
+        # Account B must not control Account A's active session.
+        for action in ("pause", "resume", "stop"):
+            with self.subTest(action=action):
+                response = self.client.post(
+                    f"/tracker/{action}",
+                    headers=other_headers,
+                )
+                self.assertEqual(response.status_code, 403, action)
+
+        # Account A's session must remain open.
+        open_rows = [row for row in self.rows() if row[2] is None]
+        self.assertEqual(len(open_rows), 1)
+        self.assertEqual(open_rows[0][0], "alpha")
 
 
 if __name__ == "__main__":

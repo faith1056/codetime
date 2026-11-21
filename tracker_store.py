@@ -10,6 +10,7 @@ class Store:
 
     def __init__(self):
         self.open_id = None  # the row this tracker opened, if any
+        self.user_id = None
 
     def apply(self, connection, actions, current):
         for action in actions:
@@ -27,17 +28,24 @@ class Store:
             return False
 
         row = connection.execute(
-            "SELECT ended_at FROM sessions WHERE id = ?", (self.open_id,)
+            "SELECT ended_at, user_id FROM sessions WHERE id = ?",
+            (self.open_id,),
         ).fetchone()
 
-        if row is not None and row[0] is None:
+        if (
+            row is not None
+            and row[0] is None
+            and row[1] == self.user_id
+        ):
             return False
 
         self.open_id = None
         return True
 
     def _open(self, connection, action):
-        running = codetime.active_session(connection)
+        running = codetime.active_session(
+            connection, user_id=self.user_id
+        )
 
         if running is not None:
             session_id, project, started = running
@@ -63,8 +71,9 @@ class Store:
                 return
 
         cursor = connection.execute(
-            "INSERT INTO sessions (project, started_at) VALUES (?, ?)",
-            (action.project, action.at.isoformat()),
+            "INSERT INTO sessions (project, started_at, user_id) "
+            "VALUES (?, ?, ?)",
+            (action.project, action.at.isoformat(), self.user_id),
         )
         connection.commit()
         self.open_id = cursor.lastrowid
@@ -75,12 +84,13 @@ class Store:
 
         session_id, self.open_id = self.open_id, None
         row = connection.execute(
-            "SELECT started_at, ended_at FROM sessions WHERE id = ?",
+            "SELECT started_at, ended_at, user_id "
+            "FROM sessions WHERE id = ?",
             (session_id,),
         ).fetchone()
 
-        # Already deleted, or closed by 'codetime stop': nothing to do.
-        if row is None or row[1] is not None:
+        # Never modify a row that belongs to another account.
+        if row is None or row[1] is not None or row[2] != self.user_id:
             return
 
         started = datetime.fromisoformat(row[0])
@@ -88,12 +98,14 @@ class Store:
 
         if ended <= started:
             connection.execute(
-                "DELETE FROM sessions WHERE id = ?", (session_id,)
+                "DELETE FROM sessions WHERE id = ? AND user_id IS ?",
+                (session_id, self.user_id),
             )
         else:
             connection.execute(
-                "UPDATE sessions SET ended_at = ? WHERE id = ?",
-                (ended.isoformat(), session_id),
+                "UPDATE sessions SET ended_at = ? "
+                "WHERE id = ? AND ended_at IS NULL AND user_id IS ?",
+                (ended.isoformat(), session_id, self.user_id),
             )
         connection.commit()
 def last_seen_path():

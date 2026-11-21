@@ -88,7 +88,24 @@ def tick_once(engine, lock, current=None, activity_provider=None):
                 engine.tracker.last_activity = last_system_activity
 
         with closing(codetime.connect()) as connection:
-            engine.tick(connection, current)
+            # The CLI login identifies the account for background tracking.
+            # Keep legacy unowned-session tests/recovery working when no CLI
+            # login file exists; web events supply their account explicitly.
+            if codetime.token_path().exists():
+                try:
+                    user_id = codetime.require_cli_user_id(connection)
+                except codetime.CodeTimeError:
+                    # Never turn an invalid login into an unowned tracker.
+                    logging.warning(
+                        "CodeTime skipped a tracker tick because the "
+                        "CLI account login is missing or invalid."
+                    )
+                    return
+
+                engine.tick(connection, current, user_id=user_id)
+            else:
+                # Preserve legacy unowned-session tests and recovery.
+                engine.tick(connection, current)
 
 
 async def tick_forever(engine, lock):

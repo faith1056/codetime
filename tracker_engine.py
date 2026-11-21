@@ -1,5 +1,7 @@
 """Connects the state machine, the database store, and crash recovery."""
 
+_UNSET = object()
+
 import tracker_store
 from tracker_state import DEFAULT_IDLE_LIMIT, State, Tracker
 
@@ -11,6 +13,7 @@ class Engine:
         self.idle_limit = idle_limit
         self.tracker = Tracker(idle_limit)
         self.store = tracker_store.Store()
+        self._owner_id = _UNSET
 
     def start(self, connection, current):
         """Run crash recovery once. Returns None, 'closed' or 'deleted'."""
@@ -40,12 +43,30 @@ class Engine:
             self.tracker.pause(current)
             self._clear_last_seen()
 
-    def activity(self, connection, project, current):
+    def _change_owner(self, connection, current, user_id):
+        if self._owner_id is _UNSET:
+            self._owner_id = user_id
+            self.store.user_id = user_id
+            return
+
+        if user_id == self._owner_id:
+            return
+
+        # Close this tracker's previous session before changing ownership.
+        self._apply(connection, self.tracker.stop(current), current)
+        self._owner_id = user_id
+        self.store.user_id = user_id
+
+    def activity(self, connection, project, current, user_id=_UNSET):
+        if user_id is not _UNSET:
+            self._change_owner(connection, current, user_id)
         self._notice_manual_stop(connection, current)
         actions = self.tracker.activity(project, current)
         self._apply(connection, actions, current)
 
-    def tick(self, connection, current):
+    def tick(self, connection, current, user_id=_UNSET):
+        if user_id is not _UNSET:
+            self._change_owner(connection, current, user_id)
         self._notice_manual_stop(connection, current)
         actions = self.tracker.check_idle(current)
         self._apply(connection, actions, current)

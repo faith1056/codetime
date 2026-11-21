@@ -2,6 +2,8 @@ import os
 import tempfile
 import unittest
 
+import account_login
+import accounts
 import codetime
 import tracker_auth
 
@@ -22,7 +24,18 @@ class TestEventRoute(unittest.TestCase):
         os.environ["CODETIME_HOME"] = self.folder.name
         self.client = TestClient(create_app(), base_url="http://127.0.0.1:47625")
         self.token = tracker_auth.create_token()
-        self.headers = {"X-CodeTime-Token": self.token}
+        with codetime.connect() as connection:
+            account_login.ensure_schema(connection)
+            accounts.register(
+                connection, "event-test@example.com", "correct horse battery"
+            )
+            self.account_token = account_login.login(
+                connection, "event-test@example.com", "correct horse battery"
+            )
+        self.headers = {
+            "X-CodeTime-Token": self.token,
+            "X-CodeTime-Account-Token": self.account_token,
+        }
 
     def tearDown(self):
         if self.old_home is None:

@@ -146,5 +146,25 @@ class TestService(unittest.TestCase):
         self.assertIsNone(self.rows()[0][2])
 
 
+    def test_invalid_cli_login_skips_background_tick(self):
+        # An expired login file must never result in an unowned session.
+        codetime.token_path().write_text("expired-login-token")
+
+        with patch(
+            "tracker_service.codetime.require_cli_user_id",
+            side_effect=codetime.CodeTimeError(
+                "Your login is invalid or expired."
+            ),
+        ), patch.object(self.engine, "tick") as engine_tick:
+            tracker_service.tick_once(
+                self.engine,
+                self.lock,
+                current=t(2),
+            )
+
+        engine_tick.assert_not_called()
+        self.assertEqual(self.rows(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

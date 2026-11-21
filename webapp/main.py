@@ -215,6 +215,7 @@ def create_app() -> FastAPI:
         try:
             with engine_lock:
                 with closing(codetime.connect()) as connection:
+                    ensure_tracker_owner(user_id)
                     engine.pause(connection, codetime.now())
 
                     try:
@@ -247,6 +248,7 @@ def create_app() -> FastAPI:
 
         try:
             with engine_lock:
+                ensure_tracker_owner(user_id)
                 with closing(codetime.connect()) as connection:
                     project, started, ended = codetime.stop_session(
                         connection,
@@ -312,6 +314,41 @@ def create_app() -> FastAPI:
                 detail="Missing or invalid token.",
             )
 
+    def require_tracker_account(
+        x_codetime_account_token: str | None = Header(default=None),
+    ) -> int:
+        """Require the account that owns a tracker request."""
+        with closing(codetime.connect()) as connection:
+            _ensure_schema_once(connection)
+            if x_codetime_account_token:
+                user_id = account_login.user_for_token(
+                    connection, x_codetime_account_token
+                )
+            else:
+                try:
+                    user_id = codetime.require_cli_user_id(connection)
+                except codetime.CodeTimeError:
+                    user_id = None
+
+        if user_id is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Missing or invalid account login token.",
+            )
+        return user_id
+
+    def ensure_tracker_owner(user_id: int) -> None:
+        """Prevent controls from changing another account's live tracker."""
+        if (
+            engine._owner_id is not tracker_engine._UNSET
+            and engine._owner_id != user_id
+            and engine.tracker.state.value != "stopped"
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="The active tracker belongs to another account.",
+            )
+
     @app.get(
         "/tracker/state",
         tags=["tracker"],
@@ -330,7 +367,10 @@ def create_app() -> FastAPI:
         tags=["tracker"],
         dependencies=[Depends(require_token)],
     )
-    def tracker_event(data: dict = Body(...)) -> dict:
+    def tracker_event(
+        data: dict = Body(...),
+        user_id: int = Depends(require_tracker_account),
+    ) -> dict:
         """Record that coding activity happened in a project."""
         current = codetime.now()
 
@@ -344,7 +384,9 @@ def create_app() -> FastAPI:
 
         with engine_lock:
             with closing(codetime.connect()) as connection:
-                engine.activity(connection, project, moment)
+                engine.activity(
+                    connection, project, moment, user_id=user_id
+                )
             return {
                 "state": engine.tracker.state.value,
                 "project": engine.tracker.project,
@@ -355,9 +397,12 @@ def create_app() -> FastAPI:
         tags=["tracker"],
         dependencies=[Depends(require_token)],
     )
-    def tracker_pause() -> dict:
+    def tracker_pause(
+        user_id: int = Depends(require_tracker_account),
+    ) -> dict:
         """Pause tracking. Activity is ignored until resume."""
         with engine_lock:
+            ensure_tracker_owner(user_id)
             with closing(codetime.connect()) as connection:
                 engine.pause(connection, codetime.now())
             return {
@@ -370,9 +415,12 @@ def create_app() -> FastAPI:
         tags=["tracker"],
         dependencies=[Depends(require_token)],
     )
-    def tracker_resume() -> dict:
+    def tracker_resume(
+        user_id: int = Depends(require_tracker_account),
+    ) -> dict:
         """Leave the paused state. The next event starts a new row."""
         with engine_lock:
+            ensure_tracker_owner(user_id)
             engine.resume(codetime.now())
             return {
                 "state": engine.tracker.state.value,
@@ -384,9 +432,12 @@ def create_app() -> FastAPI:
         tags=["tracker"],
         dependencies=[Depends(require_token)],
     )
-    def tracker_stop() -> dict:
+    def tracker_stop(
+        user_id: int = Depends(require_tracker_account),
+    ) -> dict:
         """Close the open row and return to the stopped state."""
         with engine_lock:
+            ensure_tracker_owner(user_id)
             with closing(codetime.connect()) as connection:
                 engine.stop(connection, codetime.now())
             return {
