@@ -303,7 +303,34 @@ def create_app() -> FastAPI:
                 "active": ended is None,
             })
 
-        return {"sessions": results}
+        # Calculate complete-history statistics independently of the
+        # ten-session list used by the recent-sessions panel.
+        with closing(codetime.connect()) as connection:
+            current = codetime.now()
+            start = current - __import__("datetime").timedelta(days=6)
+            start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = current.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = end + __import__("datetime").timedelta(days=1)
+
+            segments = codetime.collect_segments(
+                connection, start, end, current, user_id=user_id
+            )
+
+            daily_totals = {}
+            for _, _, day, seconds in segments:
+                key = day.isoformat()
+                daily_totals[key] = daily_totals.get(key, 0) + int(seconds)
+
+            session_count = connection.execute(
+                "SELECT COUNT(*) FROM sessions WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()[0]
+
+        return {
+            "sessions": results,
+            "weekly_daily_seconds": daily_totals,
+            "session_count": session_count,
+        }
 
 
     def require_token(x_codetime_token: str | None = Header(default=None)):

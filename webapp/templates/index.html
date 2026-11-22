@@ -12,6 +12,14 @@
     <header>
         <h1>CodeTime</h1>
         <p>Track your coding time. Understand your progress.</p>
+        <button
+            id="theme-toggle"
+            type="button"
+            class="theme-toggle"
+            aria-label="Switch to light mode"
+            title="Switch appearance"
+            hidden
+        >☀️</button>
         <button id="logout-button" type="button" class="secondary" hidden>
             Log out
         </button>
@@ -21,7 +29,9 @@
         <!-- Login -->
         <section id="login-section">
             <h2>Welcome back</h2>
-            <p>Log in to continue tracking your coding progress.</p>
+<p>Log in to continue tracking your coding progress.</p>
+
+
 
             <form id="login-form">
                 <label for="login-email">Email</label>
@@ -57,8 +67,101 @@
             </p>
         </section>
 
+        <div id="dashboard-layout" class="dashboard-layout" hidden>
+            <aside class="sidebar" aria-label="Main navigation">
+                <a class="sidebar-brand" href="#overview" aria-label="CodeTime home">
+                    <span class="brand-mark">C</span>
+                    <span>Code<span class="brand-accent">Time</span></span>
+                </a>
+
+                <p class="sidebar-label">WORKSPACE</p>
+                <nav class="sidebar-nav">
+                    <a class="nav-link active" href="#overview">
+                        <span class="nav-icon">▦</span>
+                        Dashboard
+                    </a>
+                    <a class="nav-link" href="#session-panel">
+                        <span class="nav-icon">◷</span>
+                        Sessions
+                    </a>
+                    <a class="nav-link" href="#focus-planner">
+                        <span class="nav-icon">◎</span>
+                        Focus planner
+                    </a>
+                    <a class="nav-link" href="#recent-panel">
+                        <span class="nav-icon">↗</span>
+                        Activity
+                    </a>
+                </nav>
+
+                <div class="sidebar-note">
+                    <span class="sidebar-note-icon">✦</span>
+                    <p>Small steps. Deep focus. Better work.</p>
+                </div>
+                <div class="sidebar-footer">
+                    <span class="online-dot"></span>
+                    Your workspace
+                </div>
+            </aside>
+
+            <div class="dashboard-content">
+                <section class="welcome-banner" id="overview">
+                    <div>
+                        <p class="eyebrow">YOUR PERSONAL WORKSPACE</p>
+                        <h2>Make time for what matters.</h2>
+                        <p>Track your coding, protect your focus, and see your progress.</p>
+                        <a class="banner-link" href="#session-panel">
+                            Go to session tracker <span aria-hidden="true">→</span>
+                        </a>
+                    </div>
+                    <div class="banner-art" aria-hidden="true">
+                        <div class="art-ring ring-one"></div>
+                        <div class="art-ring ring-two"></div>
+                        <div class="art-clock">◷</div>
+                        <span class="art-spark spark-one">✦</span>
+                        <span class="art-spark spark-two">✧</span>
+                    </div>
+                </section>
+
+                <div class="workspace-heading">
+                    <div>
+                        <p class="eyebrow">YOUR OVERVIEW</p>
+                        <h2>Progress at a glance</h2>
+                    </div>
+                    <span class="live-badge"><span></span> Live workspace</span>
+                </div>
+
+                <div class="summary-grid" aria-label="Progress summary">
+                    <article class="summary-card">
+                        <div class="summary-top">
+                            <span>Tracked today</span>
+                            <span class="summary-icon purple">◷</span>
+                        </div>
+                        <strong id="stat-today">0 seconds</strong>
+                        <p>Your coding time today</p>
+                    </article>
+                    <article class="summary-card">
+                        <div class="summary-top">
+                            <span>This week</span>
+                            <span class="summary-icon green">↗</span>
+                        </div>
+                        <strong id="stat-week">0 seconds</strong>
+                        <p>Tracked in the last 7 days</p>
+                    </article>
+                    <article class="summary-card">
+                        <div class="summary-top">
+                            <span>Sessions recorded</span>
+                            <span class="summary-icon blue">▤</span>
+                        </div>
+                        <strong id="stat-sessions">0</strong>
+                        <p>Sessions in your history</p>
+                    </article>
+                </div>
+
+                <div class="dashboard-grid">
+                    <div class="primary-column">
         <!-- Current session -->
-        <section class="dash" hidden>
+        <section class="dash" id="session-panel" hidden>
             <p class="eyebrow">YOUR WORKSPACE</p>
             <h2>Current Session</h2>
             <p class="muted">Choose a project and focus on your work.</p>
@@ -121,7 +224,7 @@
         </section>
 
         <!-- Today's progress -->
-        <section class="dash" hidden>
+        <section class="dash" id="today-panel" hidden>
             <p class="eyebrow">YOUR DAILY SUMMARY</p>
             <h2>Today's Progress</h2>
             <p class="muted">Your total tracked time today.</p>
@@ -129,7 +232,7 @@
         </section>
 
         <!-- Recent sessions -->
-        <section class="dash" hidden>
+        <section class="dash" id="recent-panel" hidden>
             <p class="eyebrow">YOUR ACTIVITY</p>
             <h2>Recent Sessions</h2>
 
@@ -137,6 +240,25 @@
                 <p>Loading recent sessions...</p>
             </div>
         </section>
+
+                    </div>
+
+                    <section class="activity-panel" id="weekly-activity">
+                        <p class="eyebrow">YOUR CONSISTENCY</p>
+                        <h2>Weekly activity</h2>
+                        <p class="muted">Your tracked time over the last seven days.</p>
+                        <div id="weekly-chart" class="weekly-chart"
+                             role="img" aria-label="Weekly tracked coding time">
+                            <p class="chart-empty">Your activity will appear here when you track a session.</p>
+                        </div>
+                        <div class="chart-legend">
+                            <span class="legend-dot"></span>
+                            Tracked coding time
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </div>
     </main>
 
     <footer>
@@ -150,6 +272,33 @@
         const loginSection = document.getElementById("login-section");
         const dashSections = document.querySelectorAll(".dash");
         const loginForm = document.getElementById("login-form");
+
+const themeToggle = document.getElementById("theme-toggle");
+
+function updateThemeToggle(theme) {
+    if (!themeToggle) return;
+
+    const isDark = theme === "dark";
+    themeToggle.textContent = isDark ? "☀️" : "🌙";
+    themeToggle.setAttribute(
+        "aria-label",
+        isDark ? "Switch to light mode" : "Switch to dark mode"
+    );
+}
+
+function applyTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    updateThemeToggle(theme);
+}
+
+if (themeToggle) {
+    themeToggle.addEventListener("click", () => {
+        const currentTheme = document.documentElement.dataset.theme || "dark";
+        const nextTheme = currentTheme === "dark" ? "light" : "dark";
+        applyTheme(nextTheme);
+    });
+}
+
         const loginEmail = document.getElementById("login-email");
         const loginPassword = document.getElementById("login-password");
         const showPassword = document.getElementById("show-password");
@@ -206,13 +355,18 @@
             loginPassword.type = "password";
         }
 
+        const dashboardLayout = document.getElementById("dashboard-layout");
+
         function showLogin(message) {
+            dashboardLayout.hidden = true;
+
             for (const section of dashSections) {
                 section.hidden = true;
             }
 
             loginSection.hidden = false;
             logoutButton.hidden = true;
+            if (themeToggle) themeToggle.hidden = true;
             recentSessions.replaceChildren();
             sessionStatus.textContent = "No active session";
             liveTimer.textContent = "00:00:00";
@@ -226,12 +380,14 @@
 
         function showDashboard() {
             loginSection.hidden = true;
+            dashboardLayout.hidden = false;
 
             for (const section of dashSections) {
                 section.hidden = false;
             }
 
             logoutButton.hidden = false;
+            if (themeToggle) themeToggle.hidden = false;
             loginError.textContent = "";
 
             refreshDashboard();
@@ -365,6 +521,8 @@
                 }
 
                 todayTotal.textContent = formatDuration(data.today_seconds);
+                document.getElementById("stat-today").textContent =
+                    formatDuration(data.today_seconds);
             } catch (error) {
                 if (error instanceof AuthError) {
                     return;
@@ -394,9 +552,14 @@
                     throw new Error("Could not load recent sessions.");
                 }
 
+                const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+                renderWeeklyActivity(
+                    data.weekly_daily_seconds || {},
+                    data.session_count ?? sessions.length
+                );
                 recentSessions.replaceChildren();
 
-                if (!Array.isArray(data.sessions) || data.sessions.length === 0) {
+                if (sessions.length === 0) {
                     const message = document.createElement("p");
                     message.textContent = "No sessions recorded yet.";
                     recentSessions.appendChild(message);
@@ -437,6 +600,77 @@
 
                 console.error("Recent sessions error:", error);
             }
+        }
+
+
+        function renderWeeklyActivity(dailySeconds, sessionCount) {
+            const chart = document.getElementById("weekly-chart");
+            const weekStat = document.getElementById("stat-week");
+            const sessionStat = document.getElementById("stat-sessions");
+
+            const now = new Date();
+            const days = [];
+
+            for (let offset = 6; offset >= 0; offset--) {
+                const date = new Date(now);
+                date.setHours(0, 0, 0, 0);
+                date.setDate(date.getDate() - offset);
+
+                days.push({
+                    date,
+                    key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`,
+                    seconds: 0,
+                    label: date.toLocaleDateString(undefined, { weekday: "short" })
+                });
+            }
+
+            for (const day of days) {
+                day.seconds = Math.max(
+                    0,
+                    Number(dailySeconds[day.key]) || 0
+                );
+            }
+            const weekSeconds = days.reduce((sum, day) => sum + day.seconds, 0);
+            weekStat.textContent = formatDuration(weekSeconds);
+            sessionStat.textContent = String(sessionCount);
+
+            chart.replaceChildren();
+
+            const maximum = Math.max(1, ...days.map(day => day.seconds));
+
+            for (const day of days) {
+                const column = document.createElement("div");
+                column.className = "chart-day";
+
+                const value = document.createElement("span");
+                value.className = "chart-value";
+                value.textContent = day.seconds > 0
+                    ? formatDuration(day.seconds)
+                    : "0m";
+                value.title = `${day.label}: ${formatDuration(day.seconds)}`;
+
+                const track = document.createElement("div");
+                track.className = "chart-track";
+
+                const bar = document.createElement("div");
+                bar.className = "chart-bar";
+                bar.style.height = `${day.seconds > 0 ? Math.max(5, day.seconds / maximum * 100) : 0}%`;
+                bar.setAttribute("aria-hidden", "true");
+
+                track.appendChild(bar);
+
+                const label = document.createElement("span");
+                label.className = "chart-label";
+                label.textContent = day.label;
+
+                column.append(value, track, label);
+                chart.appendChild(column);
+            }
+
+            chart.setAttribute(
+                "aria-label",
+                `Weekly tracked coding time: ${formatDuration(weekSeconds)} over the last seven days`
+            );
         }
 
         async function runAction(path, options, failureMessage) {
