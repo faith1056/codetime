@@ -645,7 +645,7 @@ if (themeToggle) {
                 const value = document.createElement("span");
                 value.className = "chart-value";
                 value.textContent = day.seconds > 0
-                    ? formatDuration(day.seconds)
+                    ? `${Math.floor(day.seconds / 60)}m ${Math.floor(day.seconds % 60)}s`
                     : "0m";
                 value.title = `${day.label}: ${formatDuration(day.seconds)}`;
 
