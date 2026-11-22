@@ -1085,6 +1085,17 @@ if (themeToggle) {
         render();
     }
 
+    // Reconcile the countdown immediately when returning to the tab.
+    // This handles timers that expired while browser updates were throttled.
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) {
+            tick();
+        }
+    });
+
+    // Also reconcile when the browser restores this page from its back-forward cache.
+    window.addEventListener("pageshow", tick);
+
     setInterval(tick, 250);
 })();
 </script>
