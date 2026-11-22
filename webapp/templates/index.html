@@ -356,6 +356,47 @@ if (themeToggle) {
         }
 
         const dashboardLayout = document.getElementById("dashboard-layout");
+        const weeklyActivity = document.getElementById("weekly-activity");
+        const sidebarLinks = document.querySelectorAll(".sidebar-nav .nav-link");
+
+        function showDashboardView(view) {
+            for (const section of dashSections) {
+                section.hidden = true;
+            }
+
+            if (view === "session-panel" || view === "focus-planner" || view === "recent-panel") {
+                const selectedSection = document.getElementById(view);
+                if (selectedSection) selectedSection.hidden = false;
+            }
+
+            if (weeklyActivity) {
+                weeklyActivity.hidden = view !== "overview" && view !== "recent-panel";
+            }
+
+            for (const link of sidebarLinks) {
+                const isActive = link.getAttribute("href") === "#" + view;
+                link.classList.toggle("active", isActive);
+
+                if (isActive) {
+                    link.setAttribute("aria-current", "page");
+                } else {
+                    link.removeAttribute("aria-current");
+                }
+            }
+        }
+
+        for (const link of document.querySelectorAll(".sidebar-nav .nav-link, .banner-link")) {
+            link.addEventListener("click", (event) => {
+                const view = link.getAttribute("href")?.slice(1);
+
+                if (!["overview", "session-panel", "focus-planner", "recent-panel"].includes(view)) {
+                    return;
+                }
+
+                event.preventDefault();
+                showDashboardView(view);
+            });
+        }
 
         function showLogin(message) {
             dashboardLayout.hidden = true;
@@ -381,10 +422,7 @@ if (themeToggle) {
         function showDashboard() {
             loginSection.hidden = true;
             dashboardLayout.hidden = false;
-
-            for (const section of dashSections) {
-                section.hidden = false;
-            }
+            showDashboardView("overview");
 
             logoutButton.hidden = false;
             if (themeToggle) themeToggle.hidden = false;
