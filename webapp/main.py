@@ -16,10 +16,15 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+import os
 from urllib.parse import urlsplit
 
 
-ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+ALLOWED_HOSTS = ["127.0.0.1", "localhost"] + [
+    host.strip()
+    for host in os.environ.get("CODETIME_ALLOWED_HOSTS", "").split(",")
+    if host.strip()
+]
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
