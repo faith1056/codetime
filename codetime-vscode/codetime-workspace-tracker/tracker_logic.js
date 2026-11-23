@@ -7,6 +7,11 @@ function tokenPath(env, home) {
     return path.join(base, "token");
 }
 
+function accountTokenPath(env, home) {
+    const base = env.CODETIME_HOME || path.join(home, ".codetime");
+    return path.join(base, "session.token");
+}
+
 function pad(n) {
     return String(n).padStart(2, "0");
 }
@@ -40,4 +45,4 @@ function makeThrottle(minGapMs) {
     };
 }
 
-module.exports = { tokenPath, localIso, buildEvent, makeThrottle };
+module.exports = { tokenPath, accountTokenPath, localIso, buildEvent, makeThrottle };

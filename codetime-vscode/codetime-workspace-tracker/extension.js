@@ -16,19 +16,18 @@ function log(message) {
     console.log(`CodeTime: ${message}`);
 }
 
-function readToken() {
+function readToken(file, label) {
     try {
-        const file = logic.tokenPath(process.env, os.homedir());
         const token = fs.readFileSync(file, 'utf8').trim();
 
         if (!token) {
-            log('ERROR: Token file is empty.');
+            log(`ERROR: ${label} token file is empty.`);
             return null;
         }
 
         return token;
     } catch (error) {
-        log(`ERROR: Cannot read token: ${error.message}`);
+        log(`ERROR: Cannot read ${label} token: ${error.message}`);
         return null;
     }
 }
@@ -41,8 +40,17 @@ async function sendActivity() {
         return;
     }
 
-    const token = readToken();
-    if (!token || !shouldSend(Date.now())) {
+    const home = os.homedir();
+    const trackerToken = readToken(
+        logic.tokenPath(process.env, home),
+        'tracker'
+    );
+    const accountToken = readToken(
+        logic.accountTokenPath(process.env, home),
+        'account'
+    );
+
+    if (!trackerToken || !accountToken || !shouldSend(Date.now())) {
         return;
     }
 
@@ -58,7 +66,8 @@ async function sendActivity() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-CodeTime-Token': token
+                'X-CodeTime-Token': trackerToken,
+                'X-CodeTime-Account-Token': accountToken
             },
             body: JSON.stringify(event)
         });

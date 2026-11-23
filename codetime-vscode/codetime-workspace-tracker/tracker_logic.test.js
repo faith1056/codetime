@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert");
-const { tokenPath, localIso, buildEvent, makeThrottle } = require("./tracker_logic.js");
+const { tokenPath, accountTokenPath, localIso, buildEvent, makeThrottle } = require("./tracker_logic.js");
 
 test("token path uses CODETIME_HOME when set", () => {
     assert.strictEqual(tokenPath({ CODETIME_HOME: "/tmp/x" }, "/home/u"), "/tmp/x/token");
@@ -12,6 +12,14 @@ test("token path defaults to ~/.codetime", () => {
     assert.strictEqual(tokenPath({}, "/home/u"), "/home/u/.codetime/token");
 });
 
+
+test("account token path uses CODETIME_HOME when set", () => {
+    assert.strictEqual(accountTokenPath({ CODETIME_HOME: "/tmp/x" }, "/home/u"), "/tmp/x/session.token");
+});
+
+test("account token path defaults to ~/.codetime", () => {
+    assert.strictEqual(accountTokenPath({}, "/home/u"), "/home/u/.codetime/session.token");
+});
 test("localIso has no time zone and pads numbers", () => {
     assert.strictEqual(localIso(new Date(2026, 10, 3, 9, 5, 7)), "2026-11-03T09:05:07");
 });
