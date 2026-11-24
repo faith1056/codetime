@@ -448,6 +448,7 @@ def load_config():
 def save_config(config):
     directory = app_dir()
     directory.mkdir(parents=True, exist_ok=True)
+    os.chmod(directory, 0o700)
 
     path = config_path()
     text = "".join(f"{key}={config[key]}\n" for key in CONFIG_KEYS if key in config)
@@ -507,6 +508,24 @@ def send_email(subject, body, config, to_email=None):
         raise CodeTimeError(f"Could not send the email: {error}") from None
 
 
+def _registered_email_for_user(connection, user_id):
+    """Return the registered email for the authenticated account."""
+    import account_login
+
+    account_login.ensure_schema(connection)
+    row = connection.execute(
+        "SELECT email FROM users WHERE id = ?",
+        (user_id,),
+    ).fetchone()
+
+    if row is None or not row[0]:
+        raise CodeTimeError(
+            "No registered email was found for this account."
+        )
+
+    return row[0]
+
+
 def email_report(connection, period, user_id):
     start, end, label = period_range(period, now())
     segments = collect_segments(
@@ -515,7 +534,8 @@ def email_report(connection, period, user_id):
     report = build_report(segments, label)
 
     subject = f"Code time report: {label} - {format_duration(total_seconds(segments))}"
-    send_email(subject, report, load_config())
+    recipient = _registered_email_for_user(connection, user_id)
+    send_email(subject, report, load_config(), to_email=recipient)
 
 
 # ---------------------------------------------------------------------------
@@ -765,7 +785,10 @@ def cmd_report(args):
                 f"Code time report: {label} - "
                 f"{format_duration(total_seconds(segments))}"
             )
-            send_email(subject, report, load_config())
+            recipient = _registered_email_for_user(connection, user_id)
+            send_email(
+                subject, report, load_config(), to_email=recipient
+            )
             print("\nReport emailed.")
 
 

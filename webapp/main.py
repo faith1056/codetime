@@ -6,6 +6,8 @@ import threading
 from pathlib import Path
 
 import account_login
+import account_email
+import report_scheduler
 import codetime
 import tracker_auth
 import tracker_engine
@@ -33,6 +35,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ReportPreferencesRequest(BaseModel):
+    enabled: bool
+    frequency: str
+
+
 _SCHEMA_READY = set()
 
 
@@ -40,7 +47,7 @@ def _ensure_schema_once(connection):
     """Create the account tables once per data folder, not on every request."""
     key = str(codetime.app_dir())
     if key not in _SCHEMA_READY:
-        account_login.ensure_schema(connection)
+        report_scheduler.ensure_schema(connection)
         _SCHEMA_READY.add(key)
 
 
@@ -56,10 +63,15 @@ def create_app() -> FastAPI:
         task = asyncio.create_task(
             tracker_service.tick_forever(engine, engine_lock)
         )
+        email_task = asyncio.create_task(
+            tracker_service.email_delivery_forever()
+        )
         try:
             yield
         finally:
             task.cancel()
+            email_task.cancel()
+            await asyncio.gather(task, email_task, return_exceptions=True)
 
     app = FastAPI(
         lifespan=lifespan,
@@ -158,6 +170,35 @@ def create_app() -> FastAPI:
             _ensure_schema_once(connection)
             account_login.logout(connection, x_codetime_account_token)
         return {"status": "logged out"}
+
+    @app.get("/api/report-preferences", tags=["reports"])
+    def read_report_preferences(
+        user_id: int = Depends(require_account),
+    ) -> dict:
+        """Return report settings and the authenticated account's email."""
+        with closing(codetime.connect()) as connection:
+            _ensure_schema_once(connection)
+            return report_scheduler.get_preferences(connection, user_id)
+
+    @app.put("/api/report-preferences", tags=["reports"])
+    def save_report_preferences(
+        data: ReportPreferencesRequest,
+        user_id: int = Depends(require_account),
+    ) -> dict:
+        """Update report settings for the authenticated account only."""
+        with closing(codetime.connect()) as connection:
+            _ensure_schema_once(connection)
+            try:
+                return report_scheduler.update_preferences(
+                    connection,
+                    user_id,
+                    data.enabled,
+                    data.frequency,
+                )
+            except ValueError as error:
+                raise HTTPException(status_code=400, detail=str(error)) from None
+            except codetime.CodeTimeError as error:
+                raise HTTPException(status_code=404, detail=str(error)) from None
 
     @app.get("/api/status", tags=["sessions"])
     def session_status(

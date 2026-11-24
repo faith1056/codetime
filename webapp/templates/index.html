@@ -92,6 +92,10 @@
                         <span class="nav-icon">↗</span>
                         Activity
                     </a>
+                    <a class="nav-link" href="#email-reports">
+                        <span class="nav-icon">✉</span>
+                        Email Reports
+                    </a>
                 </nav>
 
                 <div class="sidebar-note">
@@ -243,6 +247,46 @@
 
                     </div>
 
+                    <section class="dash" id="email-reports" hidden>
+                        <p class="eyebrow">YOUR REPORTS</p>
+                        <h2>Email Reports</h2>
+                        <p class="muted">
+                            Receive a summary of your tracked coding time.
+                            Reports are optional and disabled until you enable them.
+                        </p>
+
+                        <form id="report-preferences-form">
+                            <p>
+                                <strong>Registered email</strong><br>
+                                <span id="report-recipient">Loading account email…</span>
+                            </p>
+
+                            <label class="checkbox-row" for="reports-enabled">
+                                <input id="reports-enabled" type="checkbox">
+                                Email me scheduled coding reports
+                            </label>
+
+                            <label for="reports-frequency">Report frequency</label>
+                            <select id="reports-frequency">
+                                <option value="daily">Daily</option>
+                                <option value="weekly">Weekly</option>
+                            </select>
+
+                            <p class="muted">
+                                Daily reports cover the previous local calendar day.
+                                Weekly reports cover the previous Monday–Sunday.
+                                Delivery requires working SMTP configuration.
+                            </p>
+
+                            <button id="save-report-preferences"
+                                    type="submit" class="primary">
+                                Save preferences
+                            </button>
+                            <p id="report-preferences-status"
+                               role="status" aria-live="polite"></p>
+                        </form>
+                    </section>
+
                     <section class="activity-panel" id="weekly-activity">
                         <p class="eyebrow">YOUR CONSISTENCY</p>
                         <h2>Weekly activity</h2>
@@ -364,7 +408,8 @@ if (themeToggle) {
                 section.hidden = true;
             }
 
-            if (view === "session-panel" || view === "focus-planner" || view === "recent-panel") {
+            if (view === "session-panel" || view === "focus-planner" ||
+                view === "recent-panel" || view === "email-reports") {
                 const selectedSection = document.getElementById(view);
                 if (selectedSection) selectedSection.hidden = false;
             }
@@ -389,7 +434,8 @@ if (themeToggle) {
             link.addEventListener("click", (event) => {
                 const view = link.getAttribute("href")?.slice(1);
 
-                if (!["overview", "session-panel", "focus-planner", "recent-panel"].includes(view)) {
+                if (!["overview", "session-panel", "focus-planner",
+                      "recent-panel", "email-reports"].includes(view)) {
                     return;
                 }
 
@@ -430,6 +476,7 @@ if (themeToggle) {
 
             refreshDashboard();
             refreshRecentSessions();
+            loadReportPreferences();
         }
 
         async function api(path, options = {}) {
@@ -472,6 +519,66 @@ if (themeToggle) {
                 ? "Unable to connect to CodeTime."
                 : (error.message || fallback);
         }
+
+        async function loadReportPreferences() {
+            const status = document.getElementById("report-preferences-status");
+            try {
+                const response = await api("/api/report-preferences");
+                const data = await readJson(response);
+                if (!response.ok) {
+                    throw new Error(data.detail || "Could not load report preferences.");
+                }
+
+                document.getElementById("report-recipient").textContent =
+                    data.email || "No registered email address";
+                document.getElementById("reports-enabled").checked =
+                    Boolean(data.enabled);
+                document.getElementById("reports-frequency").value =
+                    data.frequency || "daily";
+                status.textContent = "";
+            } catch (error) {
+                if (!(error instanceof AuthError)) {
+                    status.textContent = describeError(
+                        error, "Could not load report preferences."
+                    );
+                }
+            }
+        }
+
+        document.getElementById("report-preferences-form")
+            .addEventListener("submit", async (event) => {
+                event.preventDefault();
+                const button = document.getElementById("save-report-preferences");
+                const status = document.getElementById("report-preferences-status");
+                button.disabled = true;
+                status.textContent = "Saving…";
+
+                try {
+                    const response = await api("/api/report-preferences", {
+                        method: "PUT",
+                        headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify({
+                            enabled: document.getElementById("reports-enabled").checked,
+                            frequency: document.getElementById("reports-frequency").value
+                        })
+                    });
+                    const data = await readJson(response);
+                    if (!response.ok) {
+                        throw new Error(data.detail || "Could not save preferences.");
+                    }
+                    status.textContent = data.enabled
+                        ? "Preferences saved. Scheduled reports are enabled."
+                        : "Preferences saved. Scheduled reports are disabled.";
+                } catch (error) {
+                    if (!(error instanceof AuthError)) {
+                        status.textContent = describeError(
+                            error, "Could not save preferences."
+                        );
+                    }
+                } finally {
+                    button.disabled = false;
+                }
+            });
 
         function formatDuration(seconds) {
             const safeSeconds = Math.max(0, Math.floor(seconds || 0));

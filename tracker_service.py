@@ -117,3 +117,54 @@ async def tick_forever(engine, lock):
             await asyncio.to_thread(tick_once, engine, lock)
         except Exception:
             logging.exception("CodeTime activity check failed")
+
+# Email delivery deliberately runs separately from the 30-second tracking tick.
+# A slow retry interval prevents repeated SMTP failures from hammering a server.
+EMAIL_DELIVERY_INTERVAL_SECONDS = 900
+
+
+def deliver_due_emails():
+    """Queue scheduled reports and deliver pending emails when SMTP is configured."""
+    import account_email
+    import report_scheduler
+
+    with closing(codetime.connect()) as connection:
+        report_scheduler.ensure_schema(connection)
+        report_scheduler.queue_due_reports(connection)
+
+        config = codetime.load_config()
+        required = ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD")
+        if any(not config.get(key) for key in required):
+            # Reports stay safely queued until the account configures SMTP.
+            return 0, 0
+
+        def sender(to_email, subject, body):
+            codetime.send_email(
+                subject,
+                body,
+                config,
+                to_email=to_email,
+            )
+
+        # Recover eligible failures from earlier delivery cycles.
+        # The outbox enforces the total attempt limit.
+        account_email.retry_failed(connection)
+
+        return account_email.send_pending(connection, sender)
+
+
+async def email_delivery_forever():
+    """Deliver queued email immediately, then repeat at the configured interval."""
+    while True:
+        try:
+            sent, failed = await asyncio.to_thread(deliver_due_emails)
+            if sent or failed:
+                logging.info(
+                    "CodeTime email worker: %s sent, %s failed.",
+                    sent,
+                    failed,
+                )
+        except Exception:
+            logging.exception("CodeTime email delivery cycle failed.")
+
+        await asyncio.sleep(EMAIL_DELIVERY_INTERVAL_SECONDS)
